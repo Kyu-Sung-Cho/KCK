@@ -1,0 +1,76 @@
+# Python 관련 파일
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 가상 환경
+venv/
+env/
+ENV/
+.venv/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Streamlit 관련
+.streamlit/secrets.toml
+
+# 로그 파일
+logs/
+*.log
+
+# 데이터 파일 (GitHub 용량 제한 100MB 초과 파일 제외)
+*.xlsx
+*.csv
+*.db
+*.sqlite
+
+# 개발 환경 관련
+.env
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 시스템 파일
+.DS_Store
+Thumbs.db
+
+# 환경 및 캐시 파일
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+
+# 임시 파일
+~$*
+*.bak
+*.swp
+*.tmp
+*.scpt
+
+# 개발 환경 파일
+.env
+.idea/
+.vscode/
+
+# 용량이 큰 데이터 파일 (필요에 따라 주석 처리 가능)
+# *.xlsx 
