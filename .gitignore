@@ -37,7 +37,7 @@ logs/
 *.log
 
 # 데이터 파일 (GitHub 용량 제한 100MB 초과 파일 제외)
-*.xlsx
+# *.xlsx - Git LFS로 관리하므로 주석 처리
 *.csv
 *.db
 *.sqlite
@@ -72,5 +72,13 @@ __pycache__/
 .idea/
 .vscode/
 
-# 용량이 큰 데이터 파일 (필요에 따라 주석 처리 가능)
-# *.xlsx 
+# 불필요한 Excel 파일 - 필요한 파일만 추가
+230501-거래처별판매일보.xlsx
+240501-거래처별판매일보.xlsx
+240501-반품관리.xlsx
+250501-거래처별판매일보.xlsx
+250501-반품관리.xlsx
+sorted_refund_data.xlsx
+sorted_sales_data.xlsx
+# merged_2023_2024_2025.xlsx - 배포에 필요하므로 Git LFS로 관리
+# merged_returns_2024_2025.xlsx - 배포에 필요하므로 Git LFS로 관리 
