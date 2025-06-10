@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  microgreen-app:
+    build: .
+    container_name: microgreen-recommendation-app
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    restart: always
+    environment:
+      - PYTHONUNBUFFERED=1 

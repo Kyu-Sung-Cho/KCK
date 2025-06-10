@@ -946,6 +946,28 @@ class MicrogreenRecommendationSystem:
                 else:  # 12, 1, 2
                     seasonal_preference['겨울'] += quantity
         
+        # 분기별 선호도 분석
+        quarterly_preference = {
+            '1분기': 0,  # 1-3월
+            '2분기': 0,  # 4-6월
+            '3분기': 0,  # 7-9월
+            '4분기': 0   # 10-12월
+        }
+        
+        if 'month' in customer_purchases.columns:
+            for month, group in customer_purchases.groupby('month'):
+                month = int(month)
+                quantity = group['수량'].sum()
+                
+                if month in [1, 2, 3]:
+                    quarterly_preference['1분기'] += quantity
+                elif month in [4, 5, 6]:
+                    quarterly_preference['2분기'] += quantity
+                elif month in [7, 8, 9]:
+                    quarterly_preference['3분기'] += quantity
+                else:  # 10, 11, 12
+                    quarterly_preference['4분기'] += quantity
+        
         # 반품 정보
         refund_info = {}
         if self.refund_data is not None:
@@ -1028,6 +1050,7 @@ class MicrogreenRecommendationSystem:
             '연월별_구매_날짜': yearmonth_purchase_dates,  # 연-월 정보가 포함된 날짜별 구매 데이터
             '주요_구매상품': top_products.to_dict(),
             '계절별_선호도': seasonal_preference,
+            '분기별_선호도': quarterly_preference,
             '반품_정보': refund_info,
             '최근_구매일': latest_purchase,
             '구매_빈도': purchase_frequency,
@@ -1252,7 +1275,7 @@ class MicrogreenRecommendationSystem:
 def main():
     st.set_page_config(page_title="마이크로그린 맞춤형 추천 시스템", layout="wide")
     
-    st.title("🌱 Koppert Cress Korea 맞춤형 추천 및 분석 시스템")
+    st.title("🌱 System Q (Koppert Cress Korea)")
     st.markdown("---")
     
     # 현재 디렉토리의 파일들을 확인
@@ -2118,15 +2141,13 @@ def main():
                 
                 1. **기본 정보**: 업체 코드, 카테고리, 총 구매량/금액 등 기본 정보를 확인할 수 있습니다.
                 
-                2. **구매 활동 비율**: 첫 구매일부터 마지막 구매일까지의 기간 중 실제로 구매가 이루어진 날짜의 비율을 백분율(%)로 표시합니다. 이 비율이 높을수록 해당 기간 동안 더 활발하게 구매 활동을 했음을 의미합니다.
+                2. **월별 구매 패턴**: 월별 구매량과 금액을 그래프로 확인하여 계절적 패턴을 파악합니다.
                 
-                3. **월별 구매 패턴**: 월별 구매량과 금액을 그래프로 확인하여 계절적 패턴을 파악합니다.
+                3. **상품 선호도**: 가장 많이 구매한 상품 TOP 5와 그 비중을 확인할 수 있습니다.
                 
-                4. **상품 선호도**: 가장 많이 구매한 상품 TOP 5와 그 비중을 확인할 수 있습니다.
+                4. **계절별 선호도**: 계절에 따른 구매 패턴을 분석하여 계절별 맞춤 상품을 제안합니다.
                 
-                5. **계절별 선호도**: 계절에 따른 구매 패턴을 분석하여 계절별 맞춤 상품을 제안합니다.
-                
-                6. **반품 정보**: 반품 비율과 주요 반품 이유를 확인하여 품질 개선에 활용할 수 있습니다.
+                5. **반품 정보**: 반품 비율과 주요 반품 이유를 확인하여 품질 개선에 활용할 수 있습니다.
                 
                 **업체 카테고리 분류 방식**
                 
@@ -2221,7 +2242,7 @@ def main():
                         with col1:
                             st.metric("최근 구매일", customer_info['최근_구매일'] if customer_info['최근_구매일'] else "정보 없음")
                         with col2:
-                            st.metric("구매 활동 비율", f"{customer_info['구매_빈도']:.1f}%", help="첫 구매일부터 마지막 구매일까지의 기간 중 실제로 구매가 이루어진 날짜의 비율 (%)입니다.")
+                            st.metric("구매 빈도", f"{customer_info['구매_빈도']:.1f}%")
                         
                         # 월별 구매 패턴
                         st.subheader("📅 구매 패턴 분석")
@@ -2713,6 +2734,107 @@ def main():
                                 st.info("계절별 구매 데이터가 충분하지 않습니다.")
                         else:
                             st.info("계절별 선호도 정보가 없습니다.")
+                        
+                        # 분기별 선호도
+                        st.subheader("📊 분기별 구매 패턴")
+                        
+                        if customer_info['분기별_선호도']:
+                            # 데이터 존재 여부 확인
+                            quarterly_data = customer_info['분기별_선호도']
+                            has_quarterly_data = sum(quarterly_data.values()) > 0
+                            
+                            if has_quarterly_data:
+                                # 데이터 준비
+                                quarters = list(quarterly_data.keys())
+                                quarter_values = list(quarterly_data.values())
+                                
+                                # 데이터에 근거한 설명 추가
+                                available_quarters = [q for q, v in zip(quarters, quarter_values) if v > 0]
+                                if available_quarters:
+                                    st.info(f"📊 분석된 데이터는 {'·'.join(available_quarters)}에 대한 정보를 포함하고 있습니다.")
+                                
+                                # 차트로 표시
+                                fig_quarter = px.bar(
+                                    x=quarters,
+                                    y=quarter_values,
+                                    title="분기별 구매량",
+                                    color=quarter_values,
+                                    color_continuous_scale='Blues'
+                                )
+                                fig_quarter.update_layout(height=400)
+                                st.plotly_chart(fig_quarter, use_container_width=True)
+                                
+                                # 분기별 선호도 테이블
+                                quarter_df = pd.DataFrame({
+                                    '분기': quarters,
+                                    '구매량': quarter_values
+                                })
+                                st.dataframe(quarter_df, use_container_width=True)
+                                
+                                # 최대 선호 분기
+                                max_quarter_idx = quarter_values.index(max(quarter_values))
+                                max_quarter = quarters[max_quarter_idx]
+                                max_quarter_value = max(quarter_values)
+                                
+                                # 분기별 비율 계산
+                                total_quarterly = sum(quarter_values)
+                                if total_quarterly > 0:
+                                    quarter_ratios = [round((v / total_quarterly) * 100, 1) for v in quarter_values]
+                                    
+                                    # 원형 차트
+                                    quarter_pie_df = pd.DataFrame({
+                                        '분기': quarters,
+                                        '구매량': quarter_values,
+                                        '비율(%)': quarter_ratios
+                                    })
+                                    
+                                    fig_quarter_pie = px.pie(
+                                        quarter_pie_df,
+                                        values='구매량',
+                                        names='분기',
+                                        title="분기별 구매 비중",
+                                        hover_data=['비율(%)'],
+                                        hole=0.4
+                                    )
+                                    fig_quarter_pie.update_layout(height=400)
+                                    st.plotly_chart(fig_quarter_pie, use_container_width=True)
+                                    
+                                    # 분기 추천 표시
+                                    if max_quarter_value > 0:
+                                        max_ratio = round((max_quarter_value / total_quarterly) * 100, 1)
+                                        st.markdown(f"""
+                                        ##### 분기별 구매 분석
+                                        - 가장 선호하는 분기: **{max_quarter}** ({max_ratio}%)
+                                        - 이 업체에게는 **{max_quarter}**에 맞는 상품을 우선적으로 추천하는 것이 효과적일 수 있습니다.
+                                        """)
+                                        
+                                        # 다음 분기 제안
+                                        current_quarter = None
+                                        now = datetime.now()
+                                        month = now.month
+                                        if month in [1, 2, 3]:
+                                            current_quarter = '1분기'
+                                        elif month in [4, 5, 6]:
+                                            current_quarter = '2분기'
+                                        elif month in [7, 8, 9]:
+                                            current_quarter = '3분기'
+                                        else:
+                                            current_quarter = '4분기'
+                                        
+                                        next_quarters = {
+                                            '1분기': '2분기',
+                                            '2분기': '3분기',
+                                            '3분기': '4분기',
+                                            '4분기': '1분기'
+                                        }
+                                        
+                                        if current_quarter:
+                                            next_quarter = next_quarters[current_quarter]
+                                            st.info(f"💡 현재는 {current_quarter}이며, 다가오는 {next_quarter}를 대비한 상품을 미리 제안해보세요.")
+                            else:
+                                st.info("분기별 구매 데이터가 충분하지 않습니다.")
+                        else:
+                            st.info("분기별 선호도 정보가 없습니다.")
                         
                         # 반품 정보
                         st.subheader("↩️ 반품 정보")

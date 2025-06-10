@@ -1,0 +1,196 @@
+# 마이크로그린 추천 시스템 배포 가이드
+
+## 1. 배포 옵션 개요
+
+마이크로그린 추천 시스템을 회사 전체에서 활용하기 위한 여러 배포 방법이 있습니다. 각 방식은 필요한 기술 역량, 비용, 접근성 측면에서 차이가 있으므로 회사 상황에 맞는 방법을 선택하시기 바랍니다.
+
+## 2. 내부 네트워크 공유 (가장 간단한 방법)
+
+### 2.1 배포 방법
+1. 추천 시스템이 설치된 컴퓨터에서 Streamlit 앱 실행:
+   ```
+   streamlit run app.py --server.port 8505 --server.address 0.0.0.0
+   ```
+2. 네트워크 URL(예: http://192.168.0.29:8505)을 회사 내 직원들에게 공유
+
+### 2.2 장점
+- 추가 비용 없음
+- 즉시 배포 가능
+- 내부 네트워크에만 노출되어 보안 위험 낮음
+
+### 2.3 단점
+- 호스팅 컴퓨터가 항상 켜져 있어야 함
+- 호스팅 컴퓨터가 재부팅되면 앱 재시작 필요
+- 외부 네트워크에서 접근 불가
+
+### 2.4 준비사항
+- 고정 IP 할당 (IT 부서에 문의)
+- 방화벽 설정에서 포트 8505 개방 (IT 부서에 문의)
+- Watchdog 모듈 설치 권장:
+  ```
+  xcode-select --install
+  pip install watchdog
+  ```
+
+## 3. 상시 서버 배포 (권장 방법)
+
+### 3.1 내부 서버 배포
+1. 회사 내부 서버에 Python 환경 구성:
+   ```
+   python -m venv venv
+   source venv/bin/activate  # Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+2. 시스템 서비스로 등록하여 자동 시작되도록 설정:
+   - Linux:
+     ```
+     # /etc/systemd/system/microgreen-recommender.service 파일 생성
+     [Unit]
+     Description=Microgreen Recommendation System
+     After=network.target
+     
+     [Service]
+     User=<사용자명>
+     WorkingDirectory=/path/to/app
+     ExecStart=/path/to/app/venv/bin/streamlit run app.py --server.port 8505 --server.address 0.0.0.0
+     Restart=always
+     
+     [Install]
+     WantedBy=multi-user.target
+     ```
+   - 서비스 시작:
+     ```
+     sudo systemctl enable microgreen-recommender
+     sudo systemctl start microgreen-recommender
+     ```
+
+### 3.2 클라우드 서버 배포 (AWS/GCP/Azure)
+1. 클라우드 서버 인스턴스 생성 (예: AWS EC2 t2.micro)
+2. 서버에 코드 배포 및 환경 구성:
+   ```
+   git clone <repository_url>
+   cd <repository_directory>
+   python -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+3. 내부 서버 배포와 동일하게 시스템 서비스로 등록
+4. 보안 그룹/방화벽 설정에서 포트 8505 개방
+5. 선택적으로 도메인 연결 및 HTTPS 설정 (Let's Encrypt)
+
+### 3.3 장점
+- 24시간 안정적인 접근 가능
+- 자동 재시작 지원
+- 모든 네트워크에서 접근 가능 (클라우드 배포 시)
+
+### 3.4 단점
+- 추가 서버 비용 발생 가능 (클라우드 배포 시)
+- 초기 설정에 기술적 지식 필요
+- 보안 설정 필요 (특히 클라우드 배포 시)
+
+## 4. Docker 컨테이너 배포
+
+### 4.1 배포 방법
+1. Dockerfile 작성:
+   ```
+   FROM python:3.9-slim
+   
+   WORKDIR /app
+   
+   COPY requirements.txt .
+   RUN pip install -r requirements.txt
+   
+   COPY . .
+   
+   EXPOSE 8505
+   
+   CMD ["streamlit", "run", "app.py", "--server.port=8505", "--server.address=0.0.0.0"]
+   ```
+
+2. Docker 이미지 빌드:
+   ```
+   docker build -t microgreen-recommender .
+   ```
+
+3. Docker 컨테이너 실행:
+   ```
+   docker run -d -p 8505:8505 --name microgreen-app microgreen-recommender
+   ```
+
+### 4.2 장점
+- 환경 의존성 없이 동일하게 실행 가능
+- 쉬운 배포 및 업데이트
+- 확장성 좋음 (Kubernetes 연동 가능)
+
+### 4.3 단점
+- Docker 설치 및 기본 지식 필요
+- 일부 리소스 오버헤드 발생
+
+## 5. Streamlit Cloud 활용 (소규모 팀 추천)
+
+### 5.1 배포 방법
+1. GitHub에 코드 저장소 생성
+2. https://streamlit.io/cloud 회원가입
+3. GitHub 저장소 연결 및 앱 배포 설정
+
+### 5.2 장점
+- 무료 티어 제공 (제한적 리소스)
+- 관리 필요 없음 (자동 업데이트)
+- 공개 URL 즉시 제공
+
+### 5.3 단점
+- 민감한 데이터는 외부 저장소에 보관 주의 필요
+- 일정 사용량 초과 시 유료 전환 필요
+- 커스터마이징 제한적
+
+## 6. 배포 준비사항 체크리스트
+
+### 6.1 필수 파일
+- `requirements.txt`: 필요한 Python 패키지 목록
+  ```
+  streamlit==1.32.0
+  pandas==2.1.1
+  numpy==1.26.0
+  scikit-learn==1.3.0
+  openpyxl==3.1.2
+  matplotlib==3.8.0
+  plotly==5.17.0
+  ```
+- `README.md`: 설치 및 실행 방법 문서화
+- 데이터 파일: Excel 파일 등 필요한 데이터 파일 포함
+
+### 6.2 보안 고려사항
+- 민감한 고객 데이터 처리 방법 명시
+- 데이터 파일이 공개되지 않도록 주의
+- 필요시 로그인 기능 추가 (Streamlit-Authenticator 활용)
+
+### 6.3 사용자 교육
+- 사용 설명서 작성
+- 간단한 교육 세션 진행
+- 사용자 피드백 반영 프로세스 구축
+
+## 7. 업데이트 및 유지보수
+
+### 7.1 코드 업데이트
+- Git을 활용한 버전 관리
+- 변경 사항 문서화 (CHANGELOG.md)
+- 주요 업데이트 시 사용자 공지
+
+### 7.2 데이터 업데이트
+- 판매 데이터 정기 업데이트 방법 구축
+- 자동화된 데이터 파이프라인 고려
+
+### 7.3 모니터링
+- 앱 사용량 모니터링
+- 오류 로깅 및 알림 구성
+
+## 8. 결론 및 추천 배포 방법
+
+회사 규모와 기술 환경에 따라 다음과 같은 배포 방법을 추천합니다:
+
+- **소규모 팀 (5-10명)**: 내부 네트워크 공유 방식으로 시작
+- **중규모 팀 (10-30명)**: 내부 서버 배포 또는 Streamlit Cloud 활용
+- **대규모 팀 (30명 이상)**: 클라우드 서버 배포 + Docker 컨테이너화 권장
+
+가장 중요한 것은 사용자들의 접근성과 데이터의 최신성을 보장하는 것입니다. 처음에는 간단한 방법으로 시작하고, 사용자 피드백을 바탕으로 점진적으로 개선해 나가는 것을 권장합니다. 
