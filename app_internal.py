@@ -1053,7 +1053,7 @@ class MicrogreenAnalysisSystem:
                 'top5_customers': top5_customers,
                 'customer_total_revenue': customer_revenue.head(5).to_dict(),
                 'monthly_revenue': monthly_revenue,
-                'product_revenue': product_revenue,
+                
                 'yearmonth_product_data': yearmonth_product_data
             }
             
@@ -1116,9 +1116,9 @@ class MicrogreenAnalysisSystem:
                     
                     hotel_data[hotel] = {
                         'customers': matching_customers.tolist(),
-                        'total_revenue': total_revenue,
+                        'revenue_data': {'total_revenue': total_revenue, 'product_revenue': product_revenue},
                         'monthly_revenue': monthly_revenue,
-                        'product_revenue': product_revenue,
+                        
                         'yearmonth_product_data': yearmonth_products
                     }
             
@@ -3419,7 +3419,7 @@ def main():
                                 for hotel, data in result['hotel_data'].items():
                                     hotel_revenue_data.append({
                                         '호텔': hotel,
-                                        '총매출': data['total_revenue'],
+                                        '총매출': data['revenue_data'].get('total_revenue', 0) if data['revenue_data'] else 0,
                                         '고객수': len(data['customers'])
                                     })
                                 
@@ -3449,7 +3449,7 @@ def main():
                                 for hotel, data in result['hotel_data'].items():
                                     with st.expander(f"{hotel} 상세 분석"):
                                         st.write(f"**고객명:** {', '.join(data['customers'])}")
-                                        st.metric("총 매출", f"{data['total_revenue']:,}원")
+                                        st.metric("총 매출", f"{data['revenue_data'].get('total_revenue', 0) if data['revenue_data'] else 0:,}원")
                                         
                                         # 월별 매출
                                         if data['monthly_revenue']:
@@ -3462,8 +3462,8 @@ def main():
                                             st.plotly_chart(fig, use_container_width=True)
                                         
                                         # 품목별 매출
-                                        if data['product_revenue']:
-                                            product_df = pd.DataFrame.from_dict(data['product_revenue'], orient='index', columns=['매출'])
+                                        if data['revenue_data'] and data['revenue_data'].get('product_revenue'):
+                                            product_df = pd.DataFrame.from_dict(data['revenue_data'].get('product_revenue', {}) if data['revenue_data'] else {}, orient='index', columns=['매출'])
                                             product_df.index.name = '상품명'
                                             product_df = product_df.reset_index()
                                             
@@ -3500,7 +3500,7 @@ def main():
                                 for customer, data in result['banquet_data'].items():
                                     banquet_revenue_data.append({
                                         '고객명': customer,
-                                        '총매출': data['total_revenue']
+                                        '총매출': data['revenue_data'].get('total_revenue', 0) if data['revenue_data'] else 0
                                     })
                                 
                                 if banquet_revenue_data:
@@ -3524,7 +3524,7 @@ def main():
                                 # 각 BANQUET 고객별 상세 분석
                                 for customer, data in result['banquet_data'].items():
                                     with st.expander(f"{customer} 상세 분석"):
-                                        st.metric("총 매출", f"{data['total_revenue']:,}원")
+                                        st.metric("총 매출", f"{data['revenue_data'].get('total_revenue', 0) if data['revenue_data'] else 0:,}원")
                                         
                                         # 월별 매출
                                         if data['monthly_revenue']:
@@ -3537,8 +3537,8 @@ def main():
                                             st.plotly_chart(fig, use_container_width=True)
                                         
                                         # 품목별 매출
-                                        if data['product_revenue']:
-                                            product_df = pd.DataFrame.from_dict(data['product_revenue'], orient='index', columns=['매출'])
+                                        if data['revenue_data'] and data['revenue_data'].get('product_revenue'):
+                                            product_df = pd.DataFrame.from_dict(data['revenue_data'].get('product_revenue', {}) if data['revenue_data'] else {}, orient='index', columns=['매출'])
                                             product_df.index.name = '상품명'
                                             product_df = product_df.reset_index()
                                             
