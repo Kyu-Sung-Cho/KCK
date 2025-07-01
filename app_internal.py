@@ -52,12 +52,101 @@ st.markdown("""
 
 class MicrogreenAnalysisSystem:
     def __init__(self, sales_data, refund_data=None):
+        self.original_sales_data = sales_data.copy()  # 원본 데이터 보존
+        self.original_refund_data = refund_data.copy() if refund_data is not None else None
         self.sales_data = sales_data
         self.refund_data = refund_data
         self.customer_product_matrix = None
         
         # 데이터 전처리
         self.preprocess_data()
+    
+    def filter_data_by_date_range(self, start_date, end_date):
+        """날짜 범위로 데이터 필터링"""
+        # 원본 데이터에서 시작
+        filtered_sales_data = self.original_sales_data.copy()
+        filtered_refund_data = self.original_refund_data.copy() if self.original_refund_data is not None else None
+        
+        if '날짜' in filtered_sales_data.columns:
+            try:
+                # 날짜 컬럼을 datetime으로 변환
+                filtered_sales_data['날짜'] = pd.to_datetime(filtered_sales_data['날짜'], errors='coerce')
+                
+                # 날짜 범위로 필터링
+                mask = (filtered_sales_data['날짜'] >= start_date) & (filtered_sales_data['날짜'] <= end_date)
+                filtered_sales_data = filtered_sales_data[mask]
+                
+            except Exception as e:
+                st.warning(f"날짜 필터링 중 오류 발생: {str(e)}")
+        
+        # 반품 데이터도 필터링 (날짜 컬럼이 있는 경우)
+        if filtered_refund_data is not None and '날짜' in filtered_refund_data.columns:
+            try:
+                # 반품 데이터도 같은 방식으로 날짜 변환
+                refund_dates = filtered_refund_data['날짜'].astype(str).apply(
+                    lambda x: f"20{x}" if len(str(x).split('.')[0]) == 2 else x
+                )
+                filtered_refund_data['날짜'] = pd.to_datetime(refund_dates, errors='coerce')
+                
+                # 2023년 이후 데이터만 유지
+                cutoff_date = pd.to_datetime('2023-01-01')
+                filtered_refund_data = filtered_refund_data[
+                    (filtered_refund_data['날짜'].isna()) | 
+                    (filtered_refund_data['날짜'] >= cutoff_date)
+                ]
+                
+                # 날짜 범위 필터링
+                mask = (filtered_refund_data['날짜'] >= start_date) & (filtered_refund_data['날짜'] <= end_date)
+                filtered_refund_data = filtered_refund_data[mask]
+            except Exception as e:
+                st.warning(f"반품 데이터 날짜 필터링 중 오류 발생: {str(e)}")
+        
+        # 필터링된 데이터로 새로운 인스턴스 생성
+        return MicrogreenAnalysisSystem(filtered_sales_data, filtered_refund_data)
+    
+    def get_date_range(self):
+        """데이터의 날짜 범위 반환 (2023년 이후만)"""
+        if '날짜' in self.original_sales_data.columns:
+            try:
+                # 원본 데이터의 날짜를 같은 방식으로 변환
+                original_dates = self.original_sales_data['날짜'].astype(str).apply(
+                    lambda x: f"20{x}" if len(str(x).split('.')[0]) == 2 else x
+                )
+                dates = pd.to_datetime(original_dates, errors='coerce')
+                valid_dates = dates.dropna()
+                
+                # 2023년 이후 데이터만 필터링
+                if not valid_dates.empty:
+                    cutoff_date = pd.to_datetime('2023-01-01')
+                    filtered_dates = valid_dates[valid_dates >= cutoff_date]
+                    if not filtered_dates.empty:
+                        return filtered_dates.min(), filtered_dates.max()
+            except Exception as e:
+                st.warning(f"날짜 범위 처리 중 오류: {str(e)}")
+        return None, None
+    
+    def get_available_dates(self):
+        """데이터에 실제로 존재하는 날짜들 반환 (2023년 이후만)"""
+        if '날짜' in self.original_sales_data.columns:
+            try:
+                # 원본 데이터의 날짜를 같은 방식으로 변환
+                original_dates = self.original_sales_data['날짜'].astype(str).apply(
+                    lambda x: f"20{x}" if len(str(x).split('.')[0]) == 2 else x
+                )
+                dates = pd.to_datetime(original_dates, errors='coerce')
+                valid_dates = dates.dropna()
+                
+                # 2023년 이후 데이터만 필터링
+                if not valid_dates.empty:
+                    cutoff_date = pd.to_datetime('2023-01-01')
+                    filtered_dates = valid_dates[valid_dates >= cutoff_date]
+                    if not filtered_dates.empty:
+                        # 유니크한 날짜들을 정렬하여 반환
+                        unique_dates = sorted(filtered_dates.dt.date.unique())
+                        return unique_dates
+            except Exception as e:
+                st.warning(f"날짜 처리 중 오류: {str(e)}")
+        return []
 
     def preprocess_data(self):
         """데이터 전처리"""
@@ -141,10 +230,21 @@ class MicrogreenAnalysisSystem:
                         lambda x: f"20{x}" if len(str(x).split('.')[0]) == 2 else x
                     ), errors='coerce')
                     
-                    # 월 정보 추가 (유효한 날짜만)
-                    valid_dates_mask = self.sales_data['날짜'].notna()
-                    if valid_dates_mask.any():
-                        self.sales_data.loc[valid_dates_mask, 'month'] = self.sales_data.loc[valid_dates_mask, '날짜'].dt.month
+                    # 2023년 이전 데이터 제외 (2022년 데이터 무시)
+                    if not self.sales_data.empty:
+                        valid_dates_mask = self.sales_data['날짜'].notna()
+                        if valid_dates_mask.any():
+                            # 2023년 1월 1일 이후 데이터만 유지
+                            cutoff_date = pd.to_datetime('2023-01-01')
+                            self.sales_data = self.sales_data[
+                                (self.sales_data['날짜'].isna()) | 
+                                (self.sales_data['날짜'] >= cutoff_date)
+                            ]
+                            
+                            # 월 정보 추가 (유효한 날짜만)
+                            valid_dates_mask = self.sales_data['날짜'].notna()
+                            if valid_dates_mask.any():
+                                self.sales_data.loc[valid_dates_mask, 'month'] = self.sales_data.loc[valid_dates_mask, '날짜'].dt.month
                 except Exception as e:
                     st.warning(f"날짜 변환 중 오류 발생: {str(e)}")
                     # 오류 발생 시 기본 처리만 수행
@@ -980,8 +1080,19 @@ class MicrogreenAnalysisSystem:
         }
 
     def analyze_dining_vip_metrics(self):
-        """다이닝 VIP 지표 분석 - 전년도 매출 Top 5 업체"""
+        """다이닝 VIP 지표 분석 - 지정된 8개 업체"""
         try:
+            # 지정된 8개 업체 리스트 (실제 데이터에 존재하는 업체명)
+            target_customers = [
+                "002_알라프리마(Alla prima)",
+                "002_주식회사 콘피에르", 
+                "002_주식회사 스와니예",
+                "002_*신금유통",
+                "002_정식당",
+                "002_#구찌오스테리아",
+                "002_콘피에르셀렉션"
+            ]
+            
             # 금액 컬럼이 있는지 확인
             if '금액' not in self.sales_data.columns:
                 return {
@@ -1013,29 +1124,40 @@ class MicrogreenAnalysisSystem:
             valid_sales['연월'] = valid_sales['날짜'].dt.strftime('%Y-%m')
             valid_sales['월'] = valid_sales['날짜'].dt.month
             
-            # 호텔 고객 제외 (다이닝만)
-            customer_categories = self.get_customer_categories()
-            dining_customers = customer_categories['일반']
-            valid_sales = valid_sales[valid_sales['고객명'].isin(dining_customers)]
+            # 지정된 8개 업체만 필터링
+            valid_sales = valid_sales[valid_sales['고객명'].isin(target_customers)]
             
-            # 전년도 매출 Top 5 계산
+            if valid_sales.empty:
+                return {
+                    '상태': '실패',
+                    '메시지': "지정된 8개 업체의 매출 데이터가 없습니다."
+                }
+            
+            # 업체별 매출 계산
             customer_revenue = valid_sales.groupby('고객명')['금액'].sum().sort_values(ascending=False)
-            top5_customers = customer_revenue.head(5).index.tolist()
+            selected_customers = customer_revenue.index.tolist()
             
-            # Top 5 고객들의 월별 매출 추이
-            top5_data = valid_sales[valid_sales['고객명'].isin(top5_customers)]
+            # 선택된 고객들의 월별 매출 추이
+            selected_data = valid_sales[valid_sales['고객명'].isin(selected_customers)]
             
-            # 월별 매출 집계
+            # 연월별 매출 집계
             monthly_revenue = {}
             product_revenue = {}
             yearmonth_product_data = {}
             
-            for customer in top5_customers:
-                customer_data = top5_data[top5_data['고객명'] == customer]
+            # 업체별 연월별 매출
+            yearmonth_revenue = {}
+            
+            for customer in selected_customers:
+                customer_data = selected_data[selected_data['고객명'] == customer]
                 
-                # 월별 매출
+                # 월별 매출 (기존)
                 monthly_data = customer_data.groupby('월')['금액'].sum().to_dict()
                 monthly_revenue[customer] = monthly_data
+                
+                # 연월별 매출 (새로 추가)
+                yearmonth_data = customer_data.groupby('연월')['금액'].sum().to_dict()
+                yearmonth_revenue[customer] = yearmonth_data
                 
                 # 품목별 매출
                 product_data = customer_data.groupby('상품')['금액'].sum().sort_values(ascending=False).head(10).to_dict()
@@ -1048,13 +1170,28 @@ class MicrogreenAnalysisSystem:
                 }).reset_index()
                 yearmonth_product_data[customer] = yearmonth_products
             
+            # 전체 7개 업체 통합 연월별 TOP 10 상품
+            all_yearmonth_products = selected_data.groupby(['연월', '상품']).agg({
+                '수량': 'sum',
+                '금액': 'sum'
+            }).reset_index()
+            
+            # 각 연월별로 TOP 10 상품 선정
+            monthly_top10_products = {}
+            for yearmonth in all_yearmonth_products['연월'].unique():
+                month_data = all_yearmonth_products[all_yearmonth_products['연월'] == yearmonth]
+                top10 = month_data.nlargest(10, '금액')[['상품', '수량', '금액']].to_dict('records')
+                monthly_top10_products[yearmonth] = top10
+            
             return {
                 '상태': '성공',
-                'top5_customers': top5_customers,
-                'customer_total_revenue': customer_revenue.head(5).to_dict(),
+                'selected_customers': selected_customers,
+                'customer_total_revenue': customer_revenue.to_dict(),
                 'monthly_revenue': monthly_revenue,
-                
-                'yearmonth_product_data': yearmonth_product_data
+                'yearmonth_revenue': yearmonth_revenue,
+                'product_revenue': product_revenue,
+                'yearmonth_product_data': yearmonth_product_data,
+                'monthly_top10_products': monthly_top10_products
             }
             
         except Exception as e:
@@ -1064,16 +1201,23 @@ class MicrogreenAnalysisSystem:
             }
 
     def analyze_hotel_vip_metrics(self):
-        """호텔 VIP 지표 분석 - 지정된 호텔 5곳"""
+        """호텔 VIP 지표 분석 - 지정된 5개 호텔"""
         try:
-            # 지정된 호텔 리스트
-            target_hotels = ['포시즌스', '소피텔', '인스파이어인티그레이티드리조트', '조선팰리스', '웨스틴조선']
+            # 지정된 5개 호텔 키워드 리스트
+            hotel_keywords = ["포시즌스", "소피텔", "인스파이어", "조선팰리스", "웨스틴조선"]
             
             # 금액 컬럼이 있는지 확인
             if '금액' not in self.sales_data.columns:
                 return {
                     '상태': '실패',
-                    '메시지': "금액 정보가 없어 매출 분석을 수행할 수 없습니다."
+                    '메시지': "금액 정보가 없어 호텔 VIP 분석을 수행할 수 없습니다."
+                }
+            
+            # 날짜 정보가 있는지 확인
+            if '날짜' not in self.sales_data.columns:
+                return {
+                    '상태': '실패',
+                    '메시지': "날짜 정보가 없어 호텔 VIP 분석을 수행할 수 없습니다."
                 }
             
             # 유효한 데이터 필터링
@@ -1081,51 +1225,101 @@ class MicrogreenAnalysisSystem:
             valid_sales['금액'] = pd.to_numeric(valid_sales['금액'], errors='coerce')
             valid_sales = valid_sales.dropna(subset=['금액', '날짜'])
             
+            if valid_sales.empty:
+                return {
+                    '상태': '실패',
+                    '메시지': "유효한 매출 데이터가 없습니다."
+                }
+            
             # 날짜 처리
             valid_sales['날짜'] = pd.to_datetime(valid_sales['날짜'], errors='coerce')
             valid_sales = valid_sales.dropna(subset=['날짜'])
             valid_sales['연월'] = valid_sales['날짜'].dt.strftime('%Y-%m')
             valid_sales['월'] = valid_sales['날짜'].dt.month
             
-            # 지정된 호텔들 찾기 (부분 문자열 매칭)
-            found_hotels = []
-            hotel_data = {}
+            # 호텔 키워드가 포함된 고객명 찾기
+            hotel_customers = []
+            for keyword in hotel_keywords:
+                matching_customers = valid_sales[valid_sales['고객명'].str.contains(keyword, case=False, na=False)]['고객명'].unique()
+                hotel_customers.extend(matching_customers)
             
-            for hotel in target_hotels:
-                # 고객명에 호텔명이 포함된 고객들 찾기
-                matching_customers = valid_sales[valid_sales['고객명'].str.contains(hotel, case=False, na=False)]['고객명'].unique()
+            # 중복 제거
+            hotel_customers = list(set(hotel_customers))
+            
+            if not hotel_customers:
+                return {
+                    '상태': '실패',
+                    '메시지': "지정된 5개 호텔의 매출 데이터가 없습니다."
+                }
+            
+            # 호텔 고객만 필터링
+            valid_sales = valid_sales[valid_sales['고객명'].isin(hotel_customers)]
+            
+            if valid_sales.empty:
+                return {
+                    '상태': '실패',
+                    '메시지': "호텔 고객의 매출 데이터가 없습니다."
+                }
+            
+            # 업체별 매출 계산
+            customer_revenue = valid_sales.groupby('고객명')['금액'].sum().sort_values(ascending=False)
+            selected_customers = customer_revenue.index.tolist()
+            
+            # 선택된 고객들의 월별 매출 추이
+            selected_data = valid_sales[valid_sales['고객명'].isin(selected_customers)]
+            
+            # 연월별 매출 집계
+            monthly_revenue = {}
+            product_revenue = {}
+            yearmonth_product_data = {}
+            
+            # 업체별 연월별 매출
+            yearmonth_revenue = {}
+            
+            for customer in selected_customers:
+                customer_data = selected_data[selected_data['고객명'] == customer]
                 
-                if len(matching_customers) > 0:
-                    found_hotels.append(hotel)
-                    hotel_sales = valid_sales[valid_sales['고객명'].isin(matching_customers)]
-                    
-                    # 월별 매출
-                    monthly_revenue = hotel_sales.groupby('월')['금액'].sum().to_dict()
-                    
-                    # 품목별 매출
-                    product_revenue = hotel_sales.groupby('상품')['금액'].sum().sort_values(ascending=False).head(10).to_dict()
-                    
-                    # 연월별 상품 구매 데이터
-                    yearmonth_products = hotel_sales.groupby(['연월', '상품']).agg({
-                        '수량': 'sum',
-                        '금액': 'sum'
-                    }).reset_index()
-                    
-                    # 총 매출
-                    total_revenue = hotel_sales['금액'].sum()
-                    
-                    hotel_data[hotel] = {
-                        'customers': matching_customers.tolist(),
-                        'revenue_data': {'total_revenue': total_revenue, 'product_revenue': product_revenue},
-                        'monthly_revenue': monthly_revenue,
-                        
-                        'yearmonth_product_data': yearmonth_products
-                    }
+                # 월별 매출 (기존)
+                monthly_data = customer_data.groupby('월')['금액'].sum().to_dict()
+                monthly_revenue[customer] = monthly_data
+                
+                # 연월별 매출 (새로 추가)
+                yearmonth_data = customer_data.groupby('연월')['금액'].sum().to_dict()
+                yearmonth_revenue[customer] = yearmonth_data
+                
+                # 품목별 매출
+                product_data = customer_data.groupby('상품')['금액'].sum().sort_values(ascending=False).head(10).to_dict()
+                product_revenue[customer] = product_data
+                
+                # 연월별 상품 구매 데이터
+                yearmonth_products = customer_data.groupby(['연월', '상품']).agg({
+                    '수량': 'sum',
+                    '금액': 'sum'
+                }).reset_index()
+                yearmonth_product_data[customer] = yearmonth_products
+            
+            # 전체 호텔 통합 연월별 TOP 10 상품
+            all_yearmonth_products = selected_data.groupby(['연월', '상품']).agg({
+                '수량': 'sum',
+                '금액': 'sum'
+            }).reset_index()
+            
+            # 각 연월별로 TOP 10 상품 선정
+            monthly_top10_products = {}
+            for yearmonth in all_yearmonth_products['연월'].unique():
+                month_data = all_yearmonth_products[all_yearmonth_products['연월'] == yearmonth]
+                top10 = month_data.nlargest(10, '금액')[['상품', '수량', '금액']].to_dict('records')
+                monthly_top10_products[yearmonth] = top10
             
             return {
                 '상태': '성공',
-                'found_hotels': found_hotels,
-                'hotel_data': hotel_data
+                'selected_customers': selected_customers,
+                'customer_total_revenue': customer_revenue.to_dict(),
+                'monthly_revenue': monthly_revenue,
+                'yearmonth_revenue': yearmonth_revenue,
+                'product_revenue': product_revenue,
+                'yearmonth_product_data': yearmonth_product_data,
+                'monthly_top10_products': monthly_top10_products
             }
             
         except Exception as e:
@@ -1135,94 +1329,126 @@ class MicrogreenAnalysisSystem:
             }
 
     def analyze_banquet_metrics(self):
-        """BANQUET 지표 분석 - 비고 컬럼에 banquet 관련 키워드가 있는 데이터"""
+        """
+        비고 컬럼에 BANQUET 키워드가 포함된 고객들의 매출 지표 분석
+        다이닝 VIP와 동일한 구조로 분석 결과 반환
+        """
         try:
-            # 비고 컬럼이 있는지 확인
+            print("BANQUET 분석 시작...")
+            
+            # 데이터 유효성 확인
+            if self.sales_data.empty:
+                return {
+                    '상태': '실패',
+                    '메시지': 'BANQUET 분석을 위한 데이터가 없습니다.'
+                }
+            
+            print(f"데이터 크기: {len(self.sales_data)}개 레코드")
+            print(f"컬럼: {self.sales_data.columns.tolist()}")
+            
+            # 비고 컬럼 확인
             if '비고' not in self.sales_data.columns:
                 return {
                     '상태': '실패',
-                    '메시지': "비고 컬럼이 없어 BANQUET 분석을 수행할 수 없습니다."
+                    '메시지': '비고 컬럼이 없어 BANQUET 분석을 수행할 수 없습니다.'
                 }
             
-            # 유효한 데이터 필터링
-            valid_sales = self.sales_data.copy()
+            # 유효한 데이터만 필터링
+            valid_data = self.sales_data.dropna(subset=['고객명', '상품', '날짜', '금액'])
+            print(f"유효한 데이터: {len(valid_data)}개 레코드")
             
-            # 비고 컬럼에서 banquet 관련 데이터 필터링 (대소문자 구분 없이)
-            banquet_data = valid_sales[
-                valid_sales['비고'].str.contains('banquet', case=False, na=False) |
-                valid_sales['비고'].str.contains('banquets', case=False, na=False)
-            ]
+            # BANQUET 관련 키워드로 데이터 필터링
+            print("BANQUET 관련 고객 검색 중...")
+            banquet_keywords = ['banquet', 'BANQUET', '연회', '웨딩', '파티', '행사']
+            
+            banquet_data = pd.DataFrame()
+            for keyword in banquet_keywords:
+                keyword_data = valid_data[valid_data['비고'].str.contains(keyword, case=False, na=False)]
+                print(f"'{keyword}' 키워드: {len(keyword_data)}개 레코드")
+                if len(keyword_data) > 0:
+                    print(f"  예시 비고: {keyword_data['비고'].head(3).tolist()}")
+                banquet_data = pd.concat([banquet_data, keyword_data], ignore_index=True)
+            
+            # 중복 제거
+            banquet_data = banquet_data.drop_duplicates()
+            print(f"BANQUET 관련 데이터: {len(banquet_data)}개 레코드")
             
             if banquet_data.empty:
                 return {
                     '상태': '실패',
-                    '메시지': "BANQUET 데이터가 없습니다."
+                    '메시지': 'BANQUET 관련 데이터를 찾을 수 없습니다.'
                 }
             
-            # 날짜 처리
-            banquet_data['날짜'] = pd.to_datetime(banquet_data['날짜'], errors='coerce')
-            banquet_data = banquet_data.dropna(subset=['날짜'])
-            banquet_data['연월'] = banquet_data['날짜'].dt.strftime('%Y-%m')
-            banquet_data['월'] = banquet_data['날짜'].dt.month
+            # 발견된 BANQUET 고객들
+            banquet_customers = banquet_data['고객명'].unique().tolist()
+            print(f"발견된 BANQUET 고객: {banquet_customers}")
             
-            # 호텔별 BANQUET 분석
-            banquet_customers = banquet_data['고객명'].unique()
-            banquet_data_result = {}
+            # 각 고객별 분석
+            customer_data = {}
+            customer_total_revenue = {}
+            product_revenue = {}
+            yearmonth_revenue = {}
             
-            # 각 고객별로 BANQUET 데이터 분석
             for customer in banquet_customers:
-                customer_banquet = banquet_data[banquet_data['고객명'] == customer]
+                print(f"고객 '{customer}' 분석 중...")
+                customer_records = banquet_data[banquet_data['고객명'] == customer]
+                print(f"  -> {len(customer_records)}개 레코드")
                 
-                # 품목별 판매량
-                product_sales = customer_banquet.groupby('상품')['수량'].sum().sort_values(ascending=False)
+                # 총 매출
+                total_revenue = customer_records['금액'].sum()
+                print(f"  -> 총 매출: {total_revenue:,.0f}원")
                 
-                # 월별 판매 추이
-                monthly_sales = customer_banquet.groupby('월')['수량'].sum().to_dict()
+                customer_total_revenue[customer] = total_revenue
                 
-                # 연월별 상품 구매 데이터
-                yearmonth_products = customer_banquet.groupby(['연월', '상품']).agg({
-                    '수량': 'sum'
-                }).reset_index()
+                # 상품별 매출
+                product_sales = customer_records.groupby('상품')['금액'].sum().sort_values(ascending=False)
+                product_revenue[customer] = product_sales.to_dict()
                 
-                # 금액 정보가 있는 경우
-                revenue_data = {}
-                monthly_revenue = {}
-                if '금액' in customer_banquet.columns:
-                    customer_banquet['금액'] = pd.to_numeric(customer_banquet['금액'], errors='coerce')
-                    revenue_data = {
-                        'total_revenue': customer_banquet['금액'].sum(),
-                        'product_revenue': customer_banquet.groupby('상품')['금액'].sum().sort_values(ascending=False).to_dict()
-                    }
-                    monthly_revenue = customer_banquet.groupby('월')['금액'].sum().to_dict()
-                    
-                    # 연월별 상품 구매 데이터에 금액 추가
-                    yearmonth_products_with_amount = customer_banquet.groupby(['연월', '상품']).agg({
-                        '수량': 'sum',
-                        '금액': 'sum'
-                    }).reset_index()
-                    yearmonth_products = yearmonth_products_with_amount
+                # 연월별 매출
+                customer_records_copy = customer_records.copy()
+                customer_records_copy['연월'] = customer_records_copy['날짜'].dt.strftime('%Y-%m')
+                monthly_sales = customer_records_copy.groupby('연월')['금액'].sum()
+                yearmonth_revenue[customer] = monthly_sales.to_dict()
                 
-                banquet_data_result[customer] = {
-                    'product_sales': product_sales.to_dict(),
-                    'monthly_sales': monthly_sales,
-                    'monthly_revenue': monthly_revenue,
-                    'total_quantity': customer_banquet['수량'].sum(),
-                    'revenue_data': revenue_data,
-                    'yearmonth_product_data': yearmonth_products
-                }
+                print(f"  -> 고객 데이터 저장 완료")
             
-            # 전체 BANQUET 품목별 분석
-            total_product_sales = banquet_data.groupby('상품')['수량'].sum().sort_values(ascending=False)
+            # 연월별 통합 TOP 10 상품 분석
+            monthly_top10_products = {}
+            banquet_data_copy = banquet_data.copy()
+            banquet_data_copy['연월'] = banquet_data_copy['날짜'].dt.strftime('%Y-%m')
+            
+            for month in banquet_data_copy['연월'].unique():
+                month_data = banquet_data_copy[banquet_data_copy['연월'] == month]
+                product_summary = month_data.groupby('상품').agg({
+                    '수량': 'sum',
+                    '금액': 'sum'
+                }).sort_values('금액', ascending=False).head(10)
+                
+                monthly_top10_products[month] = [
+                    {
+                        '상품': product,
+                        '수량': row['수량'],
+                        '금액': row['금액']
+                    }
+                    for product, row in product_summary.iterrows()
+                ]
+            
+            print(f"BANQUET 분석 완료: {len(banquet_customers)}개 고객 발견")
             
             return {
                 '상태': '성공',
-                'found_banquet_customers': banquet_customers.tolist(),
-                'banquet_data': banquet_data_result,
-                'total_product_sales': total_product_sales.to_dict(),
-                'total_banquet_quantity': banquet_data['수량'].sum()
+                'found_customers': banquet_customers,
+                'customer_total_revenue': customer_total_revenue,
+                'product_revenue': product_revenue,
+                'yearmonth_revenue': yearmonth_revenue,
+                'monthly_top10_products': monthly_top10_products,
+                'customer_data': customer_data
             }
             
         except Exception as e:
+            print(f"BANQUET 분석 중 오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 '상태': '실패',
                 '메시지': f"BANQUET 분석 중 오류 발생: {str(e)}"
@@ -2165,7 +2391,113 @@ class MicrogreenAnalysisSystem:
                 '고객명': 'nunique'
             }).reset_index()
             non_michelin_products = non_michelin_products.sort_values('금액', ascending=False)
-            non_michelin_top_products = non_michelin_products.head(10)['상품'].tolist()
+            non_michelin_top_products = non_michelin_products.head(20)['상품'].tolist()
+            
+            # 비미슐랭 계절별/분기별 선호도 분석
+            non_michelin_seasonal = {'봄': 0, '여름': 0, '가을': 0, '겨울': 0}
+            non_michelin_quarterly = {'1분기': 0, '2분기': 0, '3분기': 0, '4분기': 0}
+            
+            if 'month' in non_michelin_clean.columns:
+                for month, group in non_michelin_clean.groupby('month'):
+                    if pd.isna(month):
+                        continue
+                    month = int(month)
+                    quantity = group['수량'].sum()
+                    
+                    # 계절별
+                    if month in [3, 4, 5]:
+                        non_michelin_seasonal['봄'] += quantity
+                    elif month in [6, 7, 8]:
+                        non_michelin_seasonal['여름'] += quantity
+                    elif month in [9, 10, 11]:
+                        non_michelin_seasonal['가을'] += quantity
+                    else:
+                        non_michelin_seasonal['겨울'] += quantity
+                    
+                    # 분기별
+                    if month in [1, 2, 3]:
+                        non_michelin_quarterly['1분기'] += quantity
+                    elif month in [4, 5, 6]:
+                        non_michelin_quarterly['2분기'] += quantity
+                    elif month in [7, 8, 9]:
+                        non_michelin_quarterly['3분기'] += quantity
+                    else:
+                        non_michelin_quarterly['4분기'] += quantity
+            
+            # 전체 미슐랭 통합 분석 추가
+            all_michelin_data = self.sales_data[self.sales_data['고객명'].isin(all_michelin_customers)]
+            
+            if not all_michelin_data.empty:
+                # 데이터 정리
+                all_michelin_clean = all_michelin_data.copy()
+                all_michelin_clean['금액'] = pd.to_numeric(all_michelin_clean['금액'], errors='coerce')
+                all_michelin_clean['수량'] = pd.to_numeric(all_michelin_clean['수량'], errors='coerce')
+                all_michelin_clean = all_michelin_clean.dropna(subset=['금액', '수량'])
+                
+                # 전체 미슐랭 기본 지표
+                all_michelin_stats = {
+                    '총_매출': all_michelin_clean['금액'].sum(),
+                    '총_구매량': all_michelin_clean['수량'].sum(),
+                    '평균_주문금액': all_michelin_clean['금액'].mean(),
+                    '업장당_평균매출': all_michelin_clean['금액'].sum() / len(all_michelin_customers) if len(all_michelin_customers) > 0 else 0,
+                    '품목_다양성': all_michelin_clean['상품'].nunique(),
+                    '업장_수': len(all_michelin_customers),
+                    '평균_거래횟수': len(all_michelin_clean) / len(all_michelin_customers) if len(all_michelin_customers) > 0 else 0,
+                    '단위당_평균가격': all_michelin_clean['금액'].sum() / all_michelin_clean['수량'].sum() if all_michelin_clean['수량'].sum() > 0 else 0
+                }
+                
+                # 전체 미슐랭 인기 품목
+                all_michelin_products = all_michelin_clean.groupby('상품').agg({
+                    '금액': 'sum',
+                    '수량': 'sum',
+                    '고객명': 'nunique'
+                }).reset_index()
+                all_michelin_products = all_michelin_products.sort_values('금액', ascending=False)
+                all_michelin_top_products = all_michelin_products.head(20)['상품'].tolist()
+                
+                # 전체 미슐랭 계절별/분기별 선호도 분석
+                all_michelin_seasonal = {'봄': 0, '여름': 0, '가을': 0, '겨울': 0}
+                all_michelin_quarterly = {'1분기': 0, '2분기': 0, '3분기': 0, '4분기': 0}
+                
+                if 'month' in all_michelin_clean.columns:
+                    for month, group in all_michelin_clean.groupby('month'):
+                        if pd.isna(month):
+                            continue
+                        month = int(month)
+                        quantity = group['수량'].sum()
+                        
+                        # 계절별
+                        if month in [3, 4, 5]:
+                            all_michelin_seasonal['봄'] += quantity
+                        elif month in [6, 7, 8]:
+                            all_michelin_seasonal['여름'] += quantity
+                        elif month in [9, 10, 11]:
+                            all_michelin_seasonal['가을'] += quantity
+                        else:
+                            all_michelin_seasonal['겨울'] += quantity
+                        
+                        # 분기별
+                        if month in [1, 2, 3]:
+                            all_michelin_quarterly['1분기'] += quantity
+                        elif month in [4, 5, 6]:
+                            all_michelin_quarterly['2분기'] += quantity
+                        elif month in [7, 8, 9]:
+                            all_michelin_quarterly['3분기'] += quantity
+                        else:
+                            all_michelin_quarterly['4분기'] += quantity
+                
+                # 전체 미슐랭 vs 비미슐랭 비교
+                all_michelin_comparison = {
+                    '평균_주문금액_배수': all_michelin_stats['평균_주문금액'] / non_michelin_stats['평균_주문금액'] if non_michelin_stats['평균_주문금액'] > 0 else 0,
+                    '업장당_매출_배수': all_michelin_stats['업장당_평균매출'] / non_michelin_stats['업장당_평균매출'] if non_michelin_stats['업장당_평균매출'] > 0 else 0,
+                    '거래횟수_배수': all_michelin_stats['평균_거래횟수'] / non_michelin_stats['평균_거래횟수'] if non_michelin_stats['평균_거래횟수'] > 0 else 0,
+                    '단위가격_배수': all_michelin_stats['단위당_평균가격'] / non_michelin_stats['단위당_평균가격'] if non_michelin_stats['단위당_평균가격'] > 0 else 0,
+                }
+                
+                # 품목 차이 분석
+                michelin_unique_products = [p for p in all_michelin_top_products if p not in non_michelin_top_products]
+                common_products = [p for p in all_michelin_top_products if p in non_michelin_top_products]
+                non_michelin_unique_products = [p for p in non_michelin_top_products if p not in all_michelin_top_products]
             
             # 각 미슐랭 등급별 vs 비미슐랭 비교
             comparison_results = {}
@@ -2236,11 +2568,11 @@ class MicrogreenAnalysisSystem:
                         
                         # 품목 차이 분석
                         unique_products = []
-                        common_products = []
+                        common_products_grade = []
                         
                         for product in michelin_top_products:
                             if product in non_michelin_top_products:
-                                common_products.append(product)
+                                common_products_grade.append(product)
                             else:
                                 unique_products.append(product)
                         
@@ -2252,7 +2584,7 @@ class MicrogreenAnalysisSystem:
                             '비교_배수': comparison_analysis,
                             '차별화_특징': unique_features,
                             '독특한_품목': unique_products,
-                            '공통_품목': common_products,
+                            '공통_품목': common_products_grade,
                             '인기_품목_TOP5': michelin_top_products[:5]
                         }
             
@@ -2260,6 +2592,16 @@ class MicrogreenAnalysisSystem:
                 '상태': '성공',
                 '비미슐랭_기준지표': non_michelin_stats,
                 '비미슐랭_인기품목': non_michelin_top_products,
+                '비미슐랭_계절별_선호도': non_michelin_seasonal,
+                '비미슐랭_분기별_선호도': non_michelin_quarterly,
+                '전체_미슐랭_지표': all_michelin_stats if 'all_michelin_stats' in locals() else {},
+                '전체_미슐랭_인기품목': all_michelin_top_products if 'all_michelin_top_products' in locals() else [],
+                '전체_미슐랭_계절별_선호도': all_michelin_seasonal if 'all_michelin_seasonal' in locals() else {},
+                '전체_미슐랭_분기별_선호도': all_michelin_quarterly if 'all_michelin_quarterly' in locals() else {},
+                '전체_미슐랭_비교': all_michelin_comparison if 'all_michelin_comparison' in locals() else {},
+                '미슐랭_독특한_품목': michelin_unique_products if 'michelin_unique_products' in locals() else [],
+                '공통_품목': common_products if 'common_products' in locals() else [],
+                '비미슐랭_독특한_품목': non_michelin_unique_products if 'non_michelin_unique_products' in locals() else [],
                 '등급별_비교': comparison_results
             }
             
@@ -2467,12 +2809,19 @@ class MicrogreenAnalysisSystem:
             if '날짜' in store_data.columns:
                 store_data['날짜'] = pd.to_datetime(store_data['날짜'], errors='coerce')
                 store_data['연월'] = store_data['날짜'].dt.to_period('M')
+                # 지점별 월별 추이
+                branch_monthly_trend = store_data.groupby(['고객명', '연월']).agg({
+                    '금액': 'sum',
+                    '수량': 'sum'
+                }).reset_index()
+                
                 monthly_trend = store_data.groupby('연월').agg({
                     '금액': 'sum',
                     '수량': 'sum'
                 })
             else:
                 monthly_trend = pd.DataFrame()
+                branch_monthly_trend = pd.DataFrame()
             
             # 상품별 분석
             product_analysis = store_data.groupby('상품').agg({
@@ -2492,7 +2841,7 @@ class MicrogreenAnalysisSystem:
                 '총구매량': total_quantity,
                 '평균주문금액': avg_order,
                 '지점별분석': branch_analysis.to_dict('index'),
-                '월별추이': monthly_trend.to_dict('index') if not monthly_trend.empty else {},
+                '월별추이': monthly_trend.to_dict('index') if not monthly_trend.empty else {}, '지점별월별추이': branch_monthly_trend.to_dict('records') if not branch_monthly_trend.empty else [],
                 '상품별분석': product_analysis.to_dict('index'),
                 '상위상품': top_products.to_dict('index')
             }
@@ -2548,13 +2897,120 @@ class MicrogreenAnalysisSystem:
                 '메시지': f"베이커리 비교 분석 중 오류 발생: {str(e)}"
             }
 
+    def analyze_product_performance_heatmap(self, end_date):
+        """종료날짜 기준으로 해당 월과 전월 비교 히트맵 데이터 생성"""
+        try:
+            if '날짜' not in self.sales_data.columns:
+                return {
+                    '상태': '실패',
+                    '메시지': '날짜 정보가 없습니다.'
+                }
+            
+            # 종료 날짜를 기준으로 해당 월과 전월 계산
+            end_date = pd.to_datetime(end_date)
+            
+            # 종료날짜의 월 (current_month)
+            current_month_start = end_date.replace(day=1)
+            current_month_end = end_date  # 종료날짜까지만
+            
+            # 전월 (previous_month)
+            prev_month_end = current_month_start - pd.Timedelta(days=1)
+            prev_month_start = prev_month_end.replace(day=1)
+            
+            # 날짜가 있는 데이터만 필터링
+            sales_with_date = self.sales_data[self.sales_data['날짜'].notna()].copy()
+            
+            if sales_with_date.empty:
+                return {
+                    '상태': '실패',
+                    '메시지': '유효한 날짜 데이터가 없습니다.'
+                }
+            
+            # 해당 월 데이터 (종료날짜까지)
+            current_month_data = sales_with_date[
+                (sales_with_date['날짜'] >= current_month_start) & 
+                (sales_with_date['날짜'] <= current_month_end)
+            ]
+            
+            # 전월 데이터 (전체 월)
+            prev_month_data = sales_with_date[
+                (sales_with_date['날짜'] >= prev_month_start) & 
+                (sales_with_date['날짜'] <= prev_month_end)
+            ]
+            
+            # 상품별 현재월 판매량
+            current_sales = current_month_data.groupby('상품')['수량'].sum()
+            
+            # 상품별 전월 판매량
+            prev_sales = prev_month_data.groupby('상품')['수량'].sum()
+            
+            # 모든 상품 목록
+            all_products = set(current_sales.index) | set(prev_sales.index)
+            
+            heatmap_data = []
+            
+            for product in all_products:
+                current_qty = current_sales.get(product, 0)
+                prev_qty = prev_sales.get(product, 0)
+                
+                # 변화율 계산
+                if prev_qty > 0:
+                    change_rate = ((current_qty - prev_qty) / prev_qty) * 100
+                elif current_qty > 0:
+                    change_rate = 100  # 신규 상품
+                else:
+                    change_rate = 0
+                
+                # 총 판매량 (크기 결정용)
+                total_qty = current_qty + prev_qty
+                
+                if total_qty > 0:  # 판매량이 있는 상품만 포함
+                    heatmap_data.append({
+                        '상품': product,
+                        '현재월_판매량': current_qty,
+                        '전월_판매량': prev_qty,
+                        '변화율': change_rate,
+                        '총_판매량': total_qty,
+                        '크기': total_qty  # 히트맵 크기용
+                    })
+            
+            # 데이터프레임 생성
+            heatmap_df = pd.DataFrame(heatmap_data)
+            
+            if heatmap_df.empty:
+                return {
+                    '상태': '실패',
+                    '메시지': '분석할 상품 데이터가 없습니다.'
+                }
+            
+            # 크기 정규화 (20-100 범위)
+            if heatmap_df['크기'].max() > heatmap_df['크기'].min():
+                heatmap_df['정규화_크기'] = 20 + (heatmap_df['크기'] - heatmap_df['크기'].min()) / (heatmap_df['크기'].max() - heatmap_df['크기'].min()) * 80
+            else:
+                heatmap_df['정규화_크기'] = 50
+            
+            return {
+                '상태': '성공',
+                '히트맵_데이터': heatmap_df,
+                '현재월': current_month_start.strftime('%Y-%m'),
+                '전월': prev_month_start.strftime('%Y-%m'),
+                '분석_기준일': end_date.strftime('%Y-%m-%d'),
+                '분석_설명': f"{end_date.strftime('%Y-%m-%d')}를 기준으로 {current_month_start.strftime('%Y-%m')}월과 {prev_month_start.strftime('%Y-%m')}월 비교"
+            }
+            
+        except Exception as e:
+            return {
+                '상태': '실패',
+                '메시지': f"히트맵 분석 중 오류 발생: {str(e)}"
+            }
+
 def main():
     # 메인 헤더
     st.markdown('<h1 class="main-header">📊 마이크로그린 관리자 시스템</h1>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; font-size: 1.2rem; color: #666;">상품 분석, 고객 분석, RFM 세분화를 통한 비즈니스 인사이트</p>', unsafe_allow_html=True)
     
     # 현재 디렉토리의 파일들을 확인
-    sales_file = "merged_2023_2024_2025.xlsx"
+    sales_file = "merged_with_remarks_final.xlsx"
     refund_file = "merged_returns_2024_2025.xlsx"
     
     # 데이터 로드 시도
@@ -2613,8 +3069,94 @@ def main():
         # 분석 시스템 초기화
         analyzer = MicrogreenAnalysisSystem(sales_data, refund_data)
         
+        # 날짜 범위 선택 UI 추가
+        st.markdown("---")
+        st.markdown("### 📅 분석 기간 선택")
+        
+        # 데이터의 날짜 범위 및 실제 존재하는 날짜들 확인
+        min_date, max_date = analyzer.get_date_range()
+        available_dates = analyzer.get_available_dates()
+        
+        if min_date and max_date and available_dates:
+            # 실제 존재하는 날짜들 정보 표시
+            st.info(f"📅 데이터 기간: {min_date.date()} ~ {max_date.date()} (총 {len(available_dates)}일)")
+            
+            col1, col2, col3 = st.columns([2, 2, 1])
+            
+            with col1:
+                # 실제 존재하는 날짜들만 선택 가능하도록 selectbox 사용
+                start_date_options = available_dates
+                start_date_index = 0  # 기본값: 첫 번째 날짜
+                
+                start_date = st.selectbox(
+                    "시작 날짜",
+                    options=start_date_options,
+                    index=start_date_index,
+                    key="start_date_select",
+                    format_func=lambda x: x.strftime('%Y-%m-%d (%a)')
+                )
+            
+            with col2:
+                # 종료 날짜는 시작 날짜 이후의 날짜들만 선택 가능
+                end_date_options = [d for d in available_dates if d >= start_date]
+                end_date_index = len(end_date_options) - 1  # 기본값: 마지막 날짜
+                
+                end_date = st.selectbox(
+                    "종료 날짜",
+                    options=end_date_options,
+                    index=end_date_index,
+                    key="end_date_select",
+                    format_func=lambda x: x.strftime('%Y-%m-%d (%a)')
+                )
+            
+            with col3:
+                st.markdown("<br>", unsafe_allow_html=True)  # 수직 정렬을 위한 공간
+                apply_filter = st.button("🔍 기간 적용", type="primary")
+            
+            # 선택된 날짜 범위 표시
+            selected_dates_count = len([d for d in available_dates if start_date <= d <= end_date])
+            st.info(f"📊 선택된 분석 기간: {start_date} ~ {end_date} ({selected_dates_count}일)")
+            
+            # 날짜 필터 적용
+            if apply_filter:
+                if start_date <= end_date:
+                    with st.spinner('선택된 기간으로 데이터를 필터링하고 있습니다...'):
+                        # 날짜를 datetime으로 변환
+                        start_datetime = pd.to_datetime(start_date)
+                        end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+                        
+                        # 필터링된 분석기 생성
+                        filtered_analyzer = analyzer.filter_data_by_date_range(start_datetime, end_datetime)
+                        st.session_state.date_filtered_analyzer = filtered_analyzer
+                        
+                        # 필터링된 데이터 정보 표시
+                        filtered_records = len(filtered_analyzer.sales_data)
+                        total_records = len(analyzer.sales_data)
+                        
+                        st.success(f"✅ 필터링 완료: {total_records:,}개 중 {filtered_records:,}개 레코드가 선택되었습니다.")
+                        st.info("👆 위에서 원하는 분석 카테고리를 선택하여 필터링된 데이터로 분석을 진행하세요.")
+                else:
+                    st.error("시작 날짜는 종료 날짜보다 이전이어야 합니다.")
+            
+            # 초기 로드 시에만 기본 필터 적용
+            elif 'date_filtered_analyzer' not in st.session_state:
+                # 기본적으로 전체 데이터 사용
+                st.session_state.date_filtered_analyzer = analyzer
+            
+            # 필터링된 분석기 사용
+            if 'date_filtered_analyzer' in st.session_state:
+                analyzer = st.session_state.date_filtered_analyzer
+        else:
+            st.warning("날짜 정보를 찾을 수 없어 전체 데이터로 분석을 진행합니다.")
+        
+        st.markdown("---")
+        
+        # 탭 상태 관리를 위한 session_state 초기화
+        if 'selected_tab' not in st.session_state:
+            st.session_state.selected_tab = 0
+        
         # 메인 탭 구성
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        tab_names = [
             "📈 상품 분석", 
             "👥 업체 분석", 
             "🏢 고객관리",
@@ -2622,11 +3164,203 @@ def main():
             "📊 매출분석",
             "⭐ 미슐랭 분석",
             "🧁 베이커리 & 디저트"
-        ])
+        ]
+        
+        # 탭 선택 (라디오 버튼으로 변경하여 상태 유지)
+        selected_tab_name = st.radio(
+            "분석 카테고리를 선택하세요:",
+            options=tab_names,
+            index=st.session_state.selected_tab,
+            horizontal=True,
+            key="main_tab_selector"
+        )
+        
+        # 선택된 탭 인덱스 업데이트
+        st.session_state.selected_tab = tab_names.index(selected_tab_name)
         
         # 탭 1: 상품 분석
-        with tab1:
+        if st.session_state.selected_tab == 0:
             st.markdown('<h2 class="sub-header">📈 상품 분석</h2>', unsafe_allow_html=True)
+            
+            # 선택된 분석 기간 정보 표시
+            if 'date_filtered_analyzer' in st.session_state:
+                # 필터링된 데이터의 날짜 범위 확인
+                filtered_min, filtered_max = analyzer.get_date_range()
+                if filtered_min and filtered_max:
+                    st.info(f"🗓️ 현재 분석 기간: {filtered_min.date()} ~ {filtered_max.date()}")
+                else:
+                    st.info("🗓️ 선택된 기간으로 필터링된 데이터로 분석합니다.")
+            else:
+                st.info("🗓️ 전체 데이터 기간으로 분석합니다.")
+            
+            # 상품 성과 히트맵 표시
+            st.subheader("📊 상품 성과 히트맵 (전월 대비)")
+            
+            # 히트맵 분석 실행
+            if 'date_filtered_analyzer' in st.session_state:
+                # 필터링된 분석기의 날짜 범위 확인
+                filtered_min, filtered_max = st.session_state.date_filtered_analyzer.get_date_range()
+                if filtered_max:
+                    heatmap_result = st.session_state.date_filtered_analyzer.analyze_product_performance_heatmap(filtered_max)
+                else:
+                    heatmap_result = {'상태': '실패', '메시지': '날짜 범위를 확인할 수 없습니다.'}
+            else:
+                # 전체 데이터의 최대 날짜 사용
+                min_date, max_date = analyzer.get_date_range()
+                if max_date:
+                    heatmap_result = analyzer.analyze_product_performance_heatmap(max_date)
+                else:
+                    heatmap_result = {'상태': '실패', '메시지': '날짜 데이터가 없습니다.'}
+            
+            if heatmap_result['상태'] == '성공':
+                heatmap_df = heatmap_result['히트맵_데이터']
+                
+                # 히트맵 정보 표시
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("분석 상품 수", len(heatmap_df))
+                with col2:
+                    positive_change = len(heatmap_df[heatmap_df['변화율'] > 0])
+                    st.metric("성장 상품", positive_change, delta=f"{positive_change}/{len(heatmap_df)}")
+                with col3:
+                    avg_change = heatmap_df['변화율'].mean()
+                    st.metric("평균 성장률", f"{avg_change:.1f}%")
+                
+                st.info(f"📅 비교 기간: {heatmap_result['전월']} vs {heatmap_result['현재월']} (기준일: {heatmap_result['분석_기준일']})")
+                
+                # 트리맵 스타일 히트맵 생성
+                import plotly.graph_objects as go
+                import math
+                
+                # 색상 설정 (미국 주식 스타일)
+                def get_color(change_rate):
+                    if change_rate > 0:
+                        # 초록색 계열 (성장)
+                        intensity = min(abs(change_rate) / 100, 1.0)  # 0-1 사이로 정규화
+                        return f'rgba(34, 139, 34, {0.3 + intensity * 0.7})'  # 연한 초록에서 진한 초록
+                    elif change_rate < 0:
+                        # 빨간색 계열 (하락)
+                        intensity = min(abs(change_rate) / 100, 1.0)
+                        return f'rgba(220, 20, 60, {0.3 + intensity * 0.7})'  # 연한 빨강에서 진한 빨강
+                    else:
+                        return 'rgba(128, 128, 128, 0.5)'  # 회색 (변화 없음)
+                
+                # 트리맵 데이터 준비
+                fig = go.Figure(go.Treemap(
+                    labels=heatmap_df['상품'],
+                    parents=[""] * len(heatmap_df),  # 모든 항목이 루트 레벨
+                    values=heatmap_df['총_판매량'],
+                    text=[f"{row['상품']}<br>{row['변화율']:+.1f}%<br>판매량: {row['총_판매량']:,}" 
+                          for _, row in heatmap_df.iterrows()],
+                    textinfo="text",
+                    textfont=dict(size=12, color="white"),
+                    marker=dict(
+                        colors=[get_color(rate) for rate in heatmap_df['변화율']],
+                        line=dict(width=2, color="white")
+                    ),
+                    hovertemplate="<b>%{label}</b><br>" +
+                                  "변화율: %{customdata[0]:+.1f}%<br>" +
+                                  "현재월 판매량: %{customdata[1]:,}<br>" +
+                                  "전월 판매량: %{customdata[2]:,}<br>" +
+                                  "총 판매량: %{value:,}<extra></extra>",
+                    customdata=heatmap_df[['변화율', '현재월_판매량', '전월_판매량']].values
+                ))
+                
+                fig.update_layout(
+                    title=f"상품 성과 히트맵 - {heatmap_result['전월']} vs {heatmap_result['현재월']} (기준일: {heatmap_result['분석_기준일']})",
+                    font_size=12,
+                    height=600,
+                    margin=dict(t=50, l=0, r=0, b=0)
+                )
+                
+                # 히트맵 표시
+                st.plotly_chart(fig, use_container_width=True, key="product_heatmap")
+                
+                # 히트맵 상품 클릭 시뮬레이션을 위한 검색 가능한 선택 박스
+                st.markdown("**🎯 히트맵에서 상품 선택 및 분석**")
+                
+                # 검색 가능한 상품 선택
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    # 히트맵 데이터를 변화율 순으로 정렬
+                    sorted_products = heatmap_df.sort_values('변화율', ascending=False)['상품'].tolist()
+                    
+                    # 상품명과 성과 정보를 함께 표시하는 옵션 생성
+                    product_options = []
+                    for _, row in heatmap_df.sort_values('변화율', ascending=False).iterrows():
+                        change_rate = row['변화율']
+                        emoji = "🚀" if change_rate > 50 else "📈" if change_rate > 0 else "📉"
+                        option = f"{emoji} {row['상품']} ({change_rate:+.1f}%)"
+                        product_options.append(option)
+                    
+                    selected_option = st.selectbox(
+                        "히트맵에서 상품을 선택하세요 (성과순 정렬):",
+                        options=product_options,
+                        key="heatmap_product_select",
+                        help="상품을 선택하면 우측 버튼으로 바로 분석할 수 있습니다"
+                    )
+                    
+                    # 선택된 상품명 추출
+                    if selected_option:
+                        # 이모지와 변화율 정보를 제거하고 상품명만 추출
+                        selected_product_name = selected_option.split(' (')[0][2:].strip()  # 이모지 제거
+                
+                with col2:
+                    st.markdown("<br>", unsafe_allow_html=True)  # 수직 정렬
+                    if st.button("🔍 선택한 상품 분석", type="primary", key="analyze_selected_product"):
+                        if selected_option:
+                            # 선택된 상품을 session_state에 저장하고 분석 실행
+                            st.session_state.selected_product_from_heatmap = selected_product_name
+                            st.session_state.trigger_product_analysis = True
+                            st.success(f"🎯 '{selected_product_name}' 상품 분석을 시작합니다!")
+                            st.rerun()
+                
+                # 성과 상위 상품들의 빠른 분석 버튼들
+                st.markdown("**🚀 성과 상위 상품 빠른 분석**")
+                top_performers = heatmap_df.nlargest(6, '변화율')  # 6개로 줄임
+                
+                # 2열로 버튼 배치 (더 깔끔하게)
+                for i in range(0, len(top_performers), 2):
+                    cols = st.columns(2)
+                    for j, col in enumerate(cols):
+                        if i + j < len(top_performers):
+                            product = top_performers.iloc[i + j]
+                            change_rate = product['변화율']
+                            emoji = "🚀" if change_rate > 50 else "📈" if change_rate > 0 else "📉"
+                            
+                            with col:
+                                if st.button(f"{emoji} {product['상품'][:20]}{'...' if len(product['상품']) > 20 else ''}", 
+                                           key=f"quick_analysis_{i+j}",
+                                           help=f"변화율: {change_rate:+.1f}% | 총 판매량: {product['총_판매량']:,}"):
+                                    # 선택된 상품을 session_state에 저장하고 분석 실행
+                                    st.session_state.selected_product_from_heatmap = product['상품']
+                                    st.session_state.trigger_product_analysis = True
+                                    st.rerun()
+                
+                # 분석 설명 및 범례 추가
+                st.info(f"📊 **분석 설명**: {heatmap_result['분석_설명']}")
+                
+                st.markdown("""
+                **📋 히트맵 사용법:**
+                - 🟢 **초록색**: 전월 대비 판매량 증가
+                - 🔴 **빨간색**: 전월 대비 판매량 감소  
+                - 📦 **박스 크기**: 총 판매량 (클수록 많이 팔림)
+                - 🎯 **상품 선택**: 위의 선택박스에서 원하는 상품을 찾아 분석
+                - 🚀 **빠른 분석**: 성과 상위 상품들을 바로 분석 가능
+                """)
+                
+                # 성과 요약 테이블
+                with st.expander("📈 상품별 성과 상세 데이터"):
+                    # 데이터 정렬 (변화율 기준 내림차순)
+                    display_df = heatmap_df.sort_values('변화율', ascending=False).copy()
+                    display_df['변화율'] = display_df['변화율'].apply(lambda x: f"{x:+.1f}%")
+                    display_df = display_df[['상품', '현재월_판매량', '전월_판매량', '변화율', '총_판매량']]
+                    display_df.columns = ['상품명', f'{heatmap_result["현재월"]} 판매량', f'{heatmap_result["전월"]} 판매량', '변화율', '총 판매량']
+                    st.dataframe(display_df, use_container_width=True)
+            else:
+                st.warning(f"히트맵을 생성할 수 없습니다: {heatmap_result['메시지']}")
+            
+            st.markdown("---")
             
             # 분석 유형 선택
             analysis_type = st.radio(
@@ -2642,7 +3376,31 @@ def main():
                 products = []
             
             if products:
-                selected_product = st.selectbox("분석할 상품을 선택하세요:", products)
+                # 히트맵에서 선택된 상품이 있는지 확인하고 기본값 설정
+                default_index = 0
+                auto_analysis = False
+                
+                if 'selected_product_from_heatmap' in st.session_state and st.session_state.selected_product_from_heatmap:
+                    # 히트맵에서 선택된 상품이 상품 목록에 있는지 확인
+                    if st.session_state.selected_product_from_heatmap in products:
+                        default_index = products.index(st.session_state.selected_product_from_heatmap)
+                        
+                        # 자동 분석 실행 여부 확인
+                        if 'trigger_product_analysis' in st.session_state and st.session_state.trigger_product_analysis:
+                            auto_analysis = True
+                            st.session_state.trigger_product_analysis = False  # 플래그 리셋
+                
+                # 상품 선택 박스 (히트맵에서 선택된 상품이 기본값으로 설정됨)
+                if 'selected_product_from_heatmap' in st.session_state and st.session_state.selected_product_from_heatmap:
+                    st.info(f"🎯 히트맵에서 선택된 상품: **{st.session_state.selected_product_from_heatmap}**")
+                
+                selected_product = st.selectbox(
+                    "분석할 상품을 선택하세요:", 
+                    products, 
+                    index=default_index,
+                    key="main_product_select",
+                    help="히트맵에서 상품을 선택하면 자동으로 해당 상품이 선택됩니다"
+                )
                 
                 if analysis_type == "전체 상품 분석":
                     button_text = "상품 분석 실행"
@@ -2651,7 +3409,11 @@ def main():
                     button_text = "상품 분석 실행 (포시즌스 호텔 제외)"
                     button_key = "product_analysis_exclude_fourseasons"
                 
-                if st.button(button_text, type="primary", key=button_key):
+                # 버튼 클릭 또는 자동 분석 실행
+                if st.button(button_text, type="primary", key=button_key) or auto_analysis:
+                    if auto_analysis:
+                        st.info(f"🚀 히트맵에서 선택된 '{selected_product}' 상품을 자동으로 분석합니다!")
+                    
                     with st.spinner('상품을 분석하고 있습니다...'):
                         if analysis_type == "전체 상품 분석":
                             result = analyzer.analyze_product_details(selected_product)
@@ -2740,13 +3502,19 @@ def main():
                         if result['계절별_판매'] and any(v > 0 for v in result['계절별_판매'].values()):
                             st.subheader("🌱 계절별 판매 분석")
                             
-                            seasonal_df = pd.DataFrame.from_dict(result['계절별_판매'], orient='index', columns=['판매량'])
-                            seasonal_df.index.name = '계절'
-                            seasonal_df = seasonal_df.reset_index()
+                            # 계절 순서 고정: 봄, 여름, 가을, 겨울
+                            seasonal_order = ['봄', '여름', '가을', '겨울']
+                            seasonal_data = []
+                            for season in seasonal_order:
+                                if season in result['계절별_판매']:
+                                    seasonal_data.append({'계절': season, '판매량': result['계절별_판매'][season]})
+                            
+                            seasonal_df = pd.DataFrame(seasonal_data)
                             
                             if not seasonal_df.empty and seasonal_df['판매량'].sum() > 0:
                                 fig = px.pie(seasonal_df, values='판매량', names='계절',
-                                           title="계절별 판매 비중")
+                                           title="계절별 판매 비중",
+                                           category_orders={'계절': seasonal_order})
                                 st.plotly_chart(fig, use_container_width=True)
                             else:
                                 st.info("계절별 판매 데이터가 없습니다.")
@@ -2756,8 +3524,18 @@ def main():
                 st.warning("분석 가능한 상품이 없습니다.")
         
         # 탭 2: 업체 분석
-        with tab2:
+        elif st.session_state.selected_tab == 1:
             st.markdown('<h2 class="sub-header">👥 업체 분석</h2>', unsafe_allow_html=True)
+            
+            # 선택된 분석 기간 정보 표시
+            if 'date_filtered_analyzer' in st.session_state:
+                filtered_min, filtered_max = analyzer.get_date_range()
+                if filtered_min and filtered_max:
+                    st.info(f"🗓️ 현재 분석 기간: {filtered_min.date()} ~ {filtered_max.date()}")
+                else:
+                    st.info("🗓️ 선택된 기간으로 필터링된 데이터로 분석합니다.")
+            else:
+                st.info("🗓️ 전체 데이터 기간으로 분석합니다.")
             
             # 고객 선택
             if not analyzer.customer_product_matrix.empty:
@@ -2996,9 +3774,14 @@ def main():
                         if result['계절별_선호도'] and any(v > 0 for v in result['계절별_선호도'].values()):
                             st.subheader("🌱 계절별 구매 패턴")
                             
-                            seasonal_df = pd.DataFrame.from_dict(result['계절별_선호도'], orient='index', columns=['구매량'])
-                            seasonal_df.index.name = '계절'
-                            seasonal_df = seasonal_df.reset_index()
+                            # 계절 순서 고정: 봄, 여름, 가을, 겨울
+                            seasonal_order = ['봄', '여름', '가을', '겨울']
+                            seasonal_data = []
+                            for season in seasonal_order:
+                                if season in result['계절별_선호도']:
+                                    seasonal_data.append({'계절': season, '구매량': result['계절별_선호도'][season]})
+                            
+                            seasonal_df = pd.DataFrame(seasonal_data)
                             
                             if not seasonal_df.empty and seasonal_df['구매량'].sum() > 0:
                                 col1, col2 = st.columns(2)
@@ -3007,12 +3790,14 @@ def main():
                                     fig = px.bar(seasonal_df, x='계절', y='구매량',
                                                title="계절별 구매량",
                                                color='구매량',
-                                               color_continuous_scale='Viridis')
+                                               color_continuous_scale='Viridis',
+                                               category_orders={'계절': seasonal_order})
                                     st.plotly_chart(fig, use_container_width=True)
                                 
                                 with col2:
                                     fig2 = px.pie(seasonal_df, values='구매량', names='계절',
-                                                title="계절별 구매 비중")
+                                                title="계절별 구매 비중",
+                                                category_orders={'계절': seasonal_order})
                                     st.plotly_chart(fig2, use_container_width=True)
                             else:
                                 st.info("계절별 구매 데이터가 없습니다.")
@@ -3021,9 +3806,14 @@ def main():
                         if result['분기별_선호도'] and any(v > 0 for v in result['분기별_선호도'].values()):
                             st.subheader("📊 분기별 구매 패턴")
                             
-                            quarterly_df = pd.DataFrame.from_dict(result['분기별_선호도'], orient='index', columns=['구매량'])
-                            quarterly_df.index.name = '분기'
-                            quarterly_df = quarterly_df.reset_index()
+                            # 분기 순서 고정: 1분기, 2분기, 3분기, 4분기
+                            quarterly_order = ['1분기', '2분기', '3분기', '4분기']
+                            quarterly_data = []
+                            for quarter in quarterly_order:
+                                if quarter in result['분기별_선호도']:
+                                    quarterly_data.append({'분기': quarter, '구매량': result['분기별_선호도'][quarter]})
+                            
+                            quarterly_df = pd.DataFrame(quarterly_data)
                             
                             if not quarterly_df.empty and quarterly_df['구매량'].sum() > 0:
                                 col1, col2 = st.columns(2)
@@ -3032,12 +3822,14 @@ def main():
                                     fig = px.bar(quarterly_df, x='분기', y='구매량',
                                                title="분기별 구매량",
                                                color='구매량',
-                                               color_continuous_scale='Blues')
+                                               color_continuous_scale='Blues',
+                                               category_orders={'분기': quarterly_order})
                                     st.plotly_chart(fig, use_container_width=True)
                                 
                                 with col2:
                                     fig2 = px.pie(quarterly_df, values='구매량', names='분기',
-                                                title="분기별 구매 비중")
+                                                title="분기별 구매 비중",
+                                                category_orders={'분기': quarterly_order})
                                     st.plotly_chart(fig2, use_container_width=True)
                             else:
                                 st.info("분기별 구매 데이터가 없습니다.")
@@ -3125,8 +3917,18 @@ def main():
                 st.warning("분석 가능한 업체가 없습니다.")
         
         # 탭 3: 고객관리
-        with tab3:
+        elif st.session_state.selected_tab == 2:
             st.markdown('<h2 class="sub-header">🏢 고객관리</h2>', unsafe_allow_html=True)
+            
+            # 선택된 분석 기간 정보 표시
+            if 'date_filtered_analyzer' in st.session_state:
+                filtered_min, filtered_max = analyzer.get_date_range()
+                if filtered_min and filtered_max:
+                    st.info(f"🗓️ 현재 분석 기간: {filtered_min.date()} ~ {filtered_max.date()}")
+                else:
+                    st.info("🗓️ 선택된 기간으로 필터링된 데이터로 분석합니다.")
+            else:
+                st.info("🗓️ 전체 데이터 기간으로 분석합니다.")
             
             # 관리 카테고리 선택
             management_type = st.selectbox(
@@ -3301,427 +4103,324 @@ def main():
                         st.error(result['메시지'])
         
         # 탭 4: 매출 지표
-        with tab4:
+        elif st.session_state.selected_tab == 3:
             st.markdown('<h2 class="sub-header">💰 매출 지표</h2>', unsafe_allow_html=True)
             
-            # 분석 유형 선택
-            analysis_type = st.radio(
-                "분석 유형을 선택하세요:",
-                ["기본 매출 지표", "업체 특성 분석"],
-                horizontal=True
+            # 선택된 분석 기간 정보 표시
+            if 'date_filtered_analyzer' in st.session_state:
+                filtered_min, filtered_max = analyzer.get_date_range()
+                if filtered_min and filtered_max:
+                    st.info(f"🗓️ 현재 분석 기간: {filtered_min.date()} ~ {filtered_max.date()}")
+                else:
+                    st.info("🗓️ 선택된 기간으로 필터링된 데이터로 분석합니다.")
+            else:
+                st.info("🗓️ 전체 데이터 기간으로 분석합니다.")
+            
+            # 매출 지표 카테고리 선택
+            # 매출 지표 상태 관리를 위한 session_state 초기화
+            if 'sales_metric_result' not in st.session_state:
+                st.session_state.sales_metric_result = None
+            if 'sales_metric_category' not in st.session_state:
+                st.session_state.sales_metric_category = "다이닝 VIP 지표"
+                
+            # 매출 지표 카테고리 선택
+            metric_category = st.selectbox(
+                "매출 지표 카테고리를 선택하세요:",
+                ["다이닝 VIP 지표", "호텔 VIP 지표", "BANQUET 지표"],
+                index=0 if st.session_state.sales_metric_category == "다이닝 VIP 지표" else (1 if st.session_state.sales_metric_category == "호텔 VIP 지표" else 2),
+                key="metric_category_selector"
             )
             
-            if analysis_type == "기본 매출 지표":
-                # 매출 지표 카테고리 선택
-                metric_category = st.selectbox(
-                    "분석할 매출 지표를 선택하세요:",
-                    ["다이닝 VIP 지표", "호텔 VIP 지표", "BANQUET 지표"]
-                )
+            # 카테고리가 변경된 경우 결과 초기화
+            if metric_category != st.session_state.sales_metric_category:
+                st.session_state.sales_metric_result = None
+                st.session_state.sales_metric_category = metric_category
+            
+            if metric_category == "다이닝 VIP 지표":
+                st.info("📊 다이닝 VIP 지표 분석을 제공합니다 (선별 7개 업체)")
+            elif metric_category == "호텔 VIP 지표":
+                st.info("🏨 호텔 VIP 지표 분석을 제공합니다 (선별 5개 호텔)")
+            else:
+                st.info("🎉 BANQUET 지표 분석을 제공합니다 (비고란에 BANQUET 키워드 포함)")
                 
-                if st.button("매출 지표 분석 실행", type="primary"):
-                    with st.spinner(f'{metric_category} 분석을 수행하고 있습니다...'):
-                        if metric_category == "다이닝 VIP 지표":
+            # 분석 실행
+            if st.session_state.sales_metric_result is None:
+                
+                try:
+                    if metric_category == "다이닝 VIP 지표":
+                        with st.spinner('다이닝 VIP 지표 분석을 수행하고 있습니다...'):
                             result = analyzer.analyze_dining_vip_metrics()
-                        elif metric_category == "호텔 VIP 지표":
+                    elif metric_category == "호텔 VIP 지표":
+                        with st.spinner('호텔 VIP 지표 분석을 수행하고 있습니다...'):
                             result = analyzer.analyze_hotel_vip_metrics()
-                        else:  # BANQUET 지표
+                    else:  # BANQUET 지표
+                        with st.spinner('BANQUET 지표 분석을 수행하고 있습니다...'):
                             result = analyzer.analyze_banquet_metrics()
                     
-                    if result['상태'] == '성공':
-                        st.success(f"✅ {metric_category} 분석이 완료되었습니다!")
-                        
-                        # 다이닝 VIP 지표 결과 표시
+                    st.session_state.sales_metric_result = result
+                    
+                    if result and result.get('상태') == '성공':
                         if metric_category == "다이닝 VIP 지표":
-                            st.subheader("🍽️ 다이닝 VIP 매출 Top 5")
+                            st.success("✅ 다이닝 VIP 지표 분석이 완료되었습니다!")
+                        elif metric_category == "호텔 VIP 지표":
+                            st.success("✅ 호텔 VIP 지표 분석이 완료되었습니다!")
+                        else:
+                            st.success("✅ BANQUET 지표 분석이 완료되었습니다!")
+                    elif result and result.get('상태') == '실패':
+                        st.error(f"❌ {metric_category} 분석 실패: {result.get('메시지', '알 수 없는 오류')}")
+                    else:
+                        st.error(f"❌ {metric_category} 분석 중 예상치 못한 오류가 발생했습니다.")
+                
+                except Exception as e:
+                    print(f"{metric_category} 분석 중 예외 발생: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    error_result = {
+                        '상태': '실패',
+                        '메시지': f"분석 중 예외 발생: {str(e)}"
+                    }
+                    st.session_state.sales_metric_result = error_result
+                    st.error(f"❌ {metric_category} 분석 중 오류 발생: {str(e)}")
+                
+                # session_state에서 결과 가져오기
+                result = st.session_state.sales_metric_result
+                
+                # 결과가 없거나 상태가 없는 경우 처리
+                if result is None:
+                    st.warning("분석 결과가 없습니다. 다시 시도해 주세요.")
+                elif result.get('상태') != '성공':
+                    error_msg = result.get('메시지', '알 수 없는 오류가 발생했습니다.')
+                    st.error(f"데이터 처리 중 오류가 발생했습니다: {error_msg}")
+                    
+                    # 디버깅 정보 표시
+                    if st.checkbox("디버깅 정보 표시"):
+                        st.json(result)
+                elif result.get('상태') == '성공':
+                    
+                    # 선택된 지표에 따른 결과 표시
+                    if metric_category == "다이닝 VIP 지표":
+                        st.subheader("🍽️ 다이닝 VIP 매출 분석 (선별 7개 업체)")
+                    elif metric_category == "호텔 VIP 지표":
+                        st.subheader("🏨 호텔 VIP 매출 분석 (선별 5개 호텔)")
+                    else:
+                        st.subheader("🎉 BANQUET 매출 분석")
+                        
+                    # 총 매출
+                    if result['customer_total_revenue']:
+                        revenue_df = pd.DataFrame.from_dict(result['customer_total_revenue'], orient='index', columns=['총매출'])
+                        revenue_df.index.name = '고객명'
+                        revenue_df = revenue_df.reset_index()
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if metric_category == "다이닝 VIP 지표":
+                                title = "선별 7개 업체 총 매출"
+                            elif metric_category == "호텔 VIP 지표":
+                                title = "선별 5개 호텔 총 매출"
+                            else:
+                                title = "BANQUET 고객 총 매출"
+                            fig = px.bar(revenue_df, x='고객명', y='총매출', title=title)
+                            fig.update_layout(xaxis_tickangle=45)
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        with col2:
+                            if metric_category == "다이닝 VIP 지표":
+                                title = "선별 7개 업체 매출 비중"
+                            elif metric_category == "호텔 VIP 지표":
+                                title = "선별 5개 호텔 매출 비중"
+                            else:
+                                title = "BANQUET 고객 매출 비중"
+                            fig_pie = px.pie(revenue_df, values='총매출', names='고객명', title=title)
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                        
+                        st.dataframe(revenue_df, use_container_width=True)
+                        
+                    # 연월별 매출 추이
+                    if result['yearmonth_revenue']:
+                        if metric_category == "다이닝 VIP 지표":
+                            st.subheader("📅 선별 7개 업체 연월별 매출 추이")
+                        elif metric_category == "호텔 VIP 지표":
+                            st.subheader("📅 선별 5개 호텔 연월별 매출 추이")
+                        else:
+                            st.subheader("📅 BANQUET 고객 연월별 매출 추이")
                             
-                            # Top 5 고객 총 매출
-                            if result['customer_total_revenue']:
-                                revenue_df = pd.DataFrame.from_dict(result['customer_total_revenue'], orient='index', columns=['총매출'])
-                                revenue_df.index.name = '고객명'
-                                revenue_df = revenue_df.reset_index()
+                        # 연월별 매출 데이터 준비
+                        yearmonth_data = []
+                        for customer, yearmonth_sales in result['yearmonth_revenue'].items():
+                            for yearmonth, amount in yearmonth_sales.items():
+                                yearmonth_data.append({
+                                    '고객명': customer,
+                                    '연월': yearmonth,
+                                    '매출': amount
+                                })
+                        
+                        if yearmonth_data:
+                            yearmonth_df = pd.DataFrame(yearmonth_data)
+                            
+                            # 연월별 매출 추이 그래프
+                            fig = px.line(yearmonth_df, x='연월', y='매출', color='고객명',
+                                        title="연월별 매출 추이", markers=True)
+                            fig.update_layout(xaxis_tickangle=45)
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # 연월별 매출 표 (피벗 테이블)
+                            st.subheader("📊 연월별 매출 상세 표")
+                            pivot_df = yearmonth_df.pivot(index='고객명', columns='연월', values='매출').fillna(0)
+                            
+                            # 숫자 포맷팅 (천단위 구분자)
+                            pivot_formatted = pivot_df.applymap(lambda x: f"{int(x):,}" if x != 0 else "0")
+                            st.dataframe(pivot_formatted, use_container_width=True)
+                            
+                            # 총계 행 추가
+                            total_row = pivot_df.sum().to_frame().T
+                            total_row.index = ['총계']
+                            total_formatted = total_row.applymap(lambda x: f"{int(x):,}")
+                            st.write("**월별 총계:**")
+                            st.dataframe(total_formatted, use_container_width=True)
+                        
+                    # 연월별 통합 TOP 10 상품
+                    if result['monthly_top10_products']:
+                        if metric_category == "다이닝 VIP 지표":
+                            st.subheader("🏆 7개 업체 통합 연월별 TOP 10 상품")
+                            session_key = 'dining_vip_selected_month'
+                            selector_key = "dining_vip_month_selector"
+                        elif metric_category == "호텔 VIP 지표":
+                            st.subheader("🏆 5개 호텔 통합 연월별 TOP 10 상품")
+                            session_key = 'hotel_vip_selected_month'
+                            selector_key = "hotel_vip_month_selector"
+                        else:
+                            st.subheader("🏆 BANQUET 고객 통합 연월별 TOP 10 상품")
+                            session_key = 'banquet_selected_month'
+                            selector_key = "banquet_month_selector"
+                        
+                        # 연월 선택 (session_state로 상태 유지)
+                        available_months = sorted(result['monthly_top10_products'].keys())
+                        
+                        # 기본 선택값 설정 (최신 월)
+                        if session_key not in st.session_state:
+                            st.session_state[session_key] = available_months[-1] if available_months else None
+                        
+                        # 현재 선택된 월이 available_months에 없으면 기본값으로 리셋
+                        if st.session_state[session_key] not in available_months:
+                            st.session_state[session_key] = available_months[-1] if available_months else None
+                        
+                        # 현재 선택된 월의 인덱스 찾기
+                        try:
+                            current_index = available_months.index(st.session_state[session_key])
+                        except (ValueError, AttributeError):
+                            current_index = len(available_months)-1 if available_months else 0
+                        
+                        selected_month = st.selectbox(
+                            "연월을 선택하세요:",
+                            available_months,
+                            index=current_index,
+                            key=selector_key
+                        )
+                        
+                        # 선택된 월을 session_state에 저장
+                        st.session_state[session_key] = selected_month
+                        
+                        if selected_month and selected_month in result['monthly_top10_products']:
+                            top10_data = result['monthly_top10_products'][selected_month]
+                            
+                            if top10_data:
+                                # 데이터프레임으로 변환
+                                top10_df = pd.DataFrame(top10_data)
+                                top10_df['순위'] = range(1, len(top10_df) + 1)
+                                top10_df = top10_df[['순위', '상품', '수량', '금액']]
                                 
                                 col1, col2 = st.columns(2)
                                 
                                 with col1:
-                                    fig = px.bar(revenue_df, x='고객명', y='총매출',
-                                               title="다이닝 VIP Top 5 총 매출")
-                                    fig.update_layout(xaxis_tickangle=45)
-                                    st.plotly_chart(fig, use_container_width=True)
+                                    # 바 차트
+                                    fig_bar = px.bar(top10_df.head(10), x='상품', y='금액',
+                                                   title=f"{selected_month} TOP 10 상품 매출")
+                                    fig_bar.update_layout(xaxis_tickangle=45)
+                                    st.plotly_chart(fig_bar, use_container_width=True)
                                 
                                 with col2:
-                                    fig_pie = px.pie(revenue_df, values='총매출', names='고객명',
-                                                   title="다이닝 VIP 매출 비중")
+                                    # 파이차트
+                                    fig_pie = px.pie(top10_df.head(10), values='금액', names='상품',
+                                                   title=f"{selected_month} TOP 10 상품 비중")
                                     st.plotly_chart(fig_pie, use_container_width=True)
                                 
-                                st.dataframe(revenue_df, use_container_width=True)
+                                # 상세 표
+                                st.write(f"**{selected_month} TOP 10 상품 상세:**")
+                                # 숫자 포맷팅
+                                display_df = top10_df.copy()
+                                display_df['수량'] = display_df['수량'].apply(lambda x: f"{int(x):,}")
+                                display_df['금액'] = display_df['금액'].apply(lambda x: f"{int(x):,}")
+                                st.dataframe(display_df, use_container_width=True)
                             
-                            # 월별 매출 추이
-                            if result['monthly_revenue']:
-                                st.subheader("📅 Top 5 고객 월별 매출 추이")
-                                
-                                monthly_data = []
-                                for customer, monthly_sales in result['monthly_revenue'].items():
-                                    for month, amount in monthly_sales.items():
-                                        monthly_data.append({
-                                            '고객명': customer,
-                                            '월': month,
-                                            '매출': amount
-                                        })
-                                
-                                if monthly_data:
-                                    monthly_df = pd.DataFrame(monthly_data)
-                                    
-                                    fig = px.line(monthly_df, x='월', y='매출', color='고객명',
-                                                title="월별 매출 추이", markers=True)
-                                    st.plotly_chart(fig, use_container_width=True)
+                            # 모든 연월의 TOP 10 상품 요약
+                            st.subheader("📋 전체 연월별 TOP 10 상품 요약")
                             
-                            # 품목별 매출
-                            if result['product_revenue']:
-                                st.subheader("🛒 고객별 주요 품목 매출")
-                                
-                                for customer, products in result['product_revenue'].items():
-                                    with st.expander(f"{customer} 주요 품목"):
-                                        if products:
-                                            product_df = pd.DataFrame.from_dict(products, orient='index', columns=['매출'])
-                                            product_df.index.name = '상품명'
-                                            product_df = product_df.reset_index()
-                                            
-                                            # 상위 10개 품목만 표시
-                                            top_products = product_df.head(10)
-                                            
-                                            col1, col2 = st.columns(2)
-                                            
-                                            with col1:
-                                                # 파이차트
-                                                fig_pie = px.pie(top_products, values='매출', names='상품명',
-                                                               title=f"{customer} Top 10 품목 매출 비중")
-                                                st.plotly_chart(fig_pie, use_container_width=True)
-                                            
-                                            with col2:
-                                                # 바 차트
-                                                fig_bar = px.bar(top_products, x='상품명', y='매출',
-                                                               title=f"{customer} Top 10 품목 매출")
-                                                fig_bar.update_layout(xaxis_tickangle=45)
-                                                st.plotly_chart(fig_bar, use_container_width=True)
-                                            
-                                            # 데이터 테이블
-                                            st.dataframe(top_products, use_container_width=True)
-                        
-                        # 호텔 VIP 지표 결과 표시
-                        elif metric_category == "호텔 VIP 지표":
-                            st.subheader("🏨 호텔 VIP 매출 분석")
-                            
-                            if result['found_hotels']:
-                                st.info(f"발견된 호텔: {', '.join(result['found_hotels'])}")
-                                
-                                # 호텔별 총 매출
-                                hotel_revenue_data = []
-                                for hotel, data in result['hotel_data'].items():
-                                    hotel_revenue_data.append({
-                                        '호텔': hotel,
-                                        '총매출': data['revenue_data'].get('total_revenue', 0) if data['revenue_data'] else 0,
-                                        '고객수': len(data['customers'])
+                            # 모든 월의 데이터를 하나의 표로 만들기
+                            all_months_data = []
+                            for month, products in result['monthly_top10_products'].items():
+                                for i, product in enumerate(products[:5], 1):  # 상위 5개만
+                                    all_months_data.append({
+                                        '연월': month,
+                                        '순위': i,
+                                        '상품': product['상품'],
+                                        '수량': f"{int(product['수량']):,}",
+                                        '금액': f"{int(product['금액']):,}"
                                     })
-                                
-                                if hotel_revenue_data:
-                                    hotel_df = pd.DataFrame(hotel_revenue_data)
-                                    
-                                    col1, col2, col3 = st.columns(3)
-                                    
-                                    with col1:
-                                        fig = px.bar(hotel_df, x='호텔', y='총매출',
-                                                   title="호텔별 총 매출")
-                                        st.plotly_chart(fig, use_container_width=True)
-                                    
-                                    with col2:
-                                        fig = px.bar(hotel_df, x='호텔', y='고객수',
-                                                   title="호텔별 고객 수")
-                                        st.plotly_chart(fig, use_container_width=True)
-                                    
-                                    with col3:
-                                        fig_pie = px.pie(hotel_df, values='총매출', names='호텔',
-                                                       title="호텔별 매출 비중")
-                                        st.plotly_chart(fig_pie, use_container_width=True)
-                                    
-                                    st.dataframe(hotel_df, use_container_width=True)
-                                
-                                # 각 호텔별 상세 분석
-                                for hotel, data in result['hotel_data'].items():
-                                    with st.expander(f"{hotel} 상세 분석"):
-                                        st.write(f"**고객명:** {', '.join(data['customers'])}")
-                                        st.metric("총 매출", f"{data['revenue_data'].get('total_revenue', 0) if data['revenue_data'] else 0:,}원")
-                                        
-                                        # 월별 매출
-                                        if data['monthly_revenue']:
-                                            monthly_df = pd.DataFrame.from_dict(data['monthly_revenue'], orient='index', columns=['매출'])
-                                            monthly_df.index.name = '월'
-                                            monthly_df = monthly_df.reset_index()
-                                            
-                                            fig = px.line(monthly_df, x='월', y='매출',
-                                                        title=f"{hotel} 월별 매출 추이", markers=True)
-                                            st.plotly_chart(fig, use_container_width=True)
-                                        
-                                        # 품목별 매출
-                                        if data['revenue_data'] and data['revenue_data'].get('product_revenue'):
-                                            product_df = pd.DataFrame.from_dict(data['revenue_data'].get('product_revenue', {}) if data['revenue_data'] else {}, orient='index', columns=['매출'])
-                                            product_df.index.name = '상품명'
-                                            product_df = product_df.reset_index()
-                                            
-                                            # 상위 10개 품목 선택
-                                            top_products = product_df.head(10)
-                                            
-                                            col1, col2 = st.columns(2)
-                                            
-                                            with col1:
-                                                fig_pie = px.pie(top_products, values='매출', names='상품명',
-                                                               title=f"{hotel} Top 10 품목 매출 비중")
-                                                st.plotly_chart(fig_pie, use_container_width=True)
-                                            
-                                            with col2:
-                                                fig_bar = px.bar(top_products, x='상품명', y='매출',
-                                                               title=f"{hotel} Top 10 품목 매출")
-                                                fig_bar.update_layout(xaxis_tickangle=45)
-                                                st.plotly_chart(fig_bar, use_container_width=True)
-                                            
-                                            # 데이터 테이블
-                                            st.dataframe(top_products, use_container_width=True)
-                            else:
-                                st.warning("호텔 고객 데이터를 찾을 수 없습니다.")
-                        
-                        # BANQUET 지표 결과 표시
-                        else:  # BANQUET 지표
-                            st.subheader("🎉 BANQUET 매출 분석")
                             
-                            if result['found_banquet_customers']:
-                                st.info(f"발견된 BANQUET 고객: {', '.join(result['found_banquet_customers'])}")
-                                
-                                # BANQUET 고객별 총 매출
-                                banquet_revenue_data = []
-                                for customer, data in result['banquet_data'].items():
-                                    banquet_revenue_data.append({
-                                        '고객명': customer,
-                                        '총매출': data['revenue_data'].get('total_revenue', 0) if data['revenue_data'] else 0
-                                    })
-                                
-                                if banquet_revenue_data:
-                                    banquet_df = pd.DataFrame(banquet_revenue_data)
-                                    
-                                    col1, col2 = st.columns(2)
-                                    
-                                    with col1:
-                                        fig = px.bar(banquet_df, x='고객명', y='총매출',
-                                                   title="BANQUET 고객별 총 매출")
-                                        fig.update_layout(xaxis_tickangle=45)
-                                        st.plotly_chart(fig, use_container_width=True)
-                                    
-                                    with col2:
-                                        fig_pie = px.pie(banquet_df, values='총매출', names='고객명',
-                                                       title="BANQUET 매출 비중")
-                                        st.plotly_chart(fig_pie, use_container_width=True)
-                                    
-                                    st.dataframe(banquet_df, use_container_width=True)
-                                
-                                # 각 BANQUET 고객별 상세 분석
-                                for customer, data in result['banquet_data'].items():
-                                    with st.expander(f"{customer} 상세 분석"):
-                                        st.metric("총 매출", f"{data['revenue_data'].get('total_revenue', 0) if data['revenue_data'] else 0:,}원")
+                            if all_months_data:
+                                summary_df = pd.DataFrame(all_months_data)
+                                st.dataframe(summary_df, use_container_width=True)
+                        
+                        # 개별 업체별 주요 품목 매출
+                        if result['product_revenue']:
+                            st.subheader("🛒 개별 업체별 주요 품목 매출")
+                            
+                            for customer, products in result['product_revenue'].items():
+                                with st.expander(f"{customer} 주요 품목"):
+                                    if products:
+                                        product_df = pd.DataFrame.from_dict(products, orient='index', columns=['매출'])
+                                        product_df.index.name = '상품명'
+                                        product_df = product_df.reset_index()
                                         
-                                        # 월별 매출
-                                        if data['monthly_revenue']:
-                                            monthly_df = pd.DataFrame.from_dict(data['monthly_revenue'], orient='index', columns=['매출'])
-                                            monthly_df.index.name = '월'
-                                            monthly_df = monthly_df.reset_index()
-                                            
-                                            fig = px.line(monthly_df, x='월', y='매출',
-                                                        title=f"{customer} 월별 매출 추이", markers=True)
-                                            st.plotly_chart(fig, use_container_width=True)
+                                        # 상위 10개 품목만 표시
+                                        top_products = product_df.head(10)
                                         
-                                        # 품목별 매출
-                                        if data['revenue_data'] and data['revenue_data'].get('product_revenue'):
-                                            product_df = pd.DataFrame.from_dict(data['revenue_data'].get('product_revenue', {}) if data['revenue_data'] else {}, orient='index', columns=['매출'])
-                                            product_df.index.name = '상품명'
-                                            product_df = product_df.reset_index()
-                                            
-                                            # 상위 10개 품목 선택
-                                            top_products = product_df.head(10)
-                                            
-                                            col1, col2 = st.columns(2)
-                                            
-                                            with col1:
-                                                fig_pie = px.pie(top_products, values='매출', names='상품명',
-                                                               title=f"{customer} Top 10 품목 매출 비중")
-                                                st.plotly_chart(fig_pie, use_container_width=True)
-                                            
-                                            with col2:
-                                                fig_bar = px.bar(top_products, x='상품명', y='매출',
-                                                               title=f"{customer} Top 10 품목 매출")
-                                                fig_bar.update_layout(xaxis_tickangle=45)
-                                                st.plotly_chart(fig_bar, use_container_width=True)
-                                            
-                                            # 데이터 테이블
-                                            st.dataframe(top_products, use_container_width=True)
-                            else:
-                                st.warning("BANQUET 고객 데이터를 찾을 수 없습니다.")
-                    else:
-                        st.error(result['메시지'])
-            
-            elif analysis_type == "업체 특성 분석":
-                st.subheader("🏢 업체 특성 분석")
-                st.markdown("업체별 구매 패턴, 품목 다양성, 고객 등급 등을 종합적으로 분석합니다.")
-                
-                # 세션 상태 초기화
-                if 'company_analysis_result' not in st.session_state:
-                    st.session_state.company_analysis_result = None
-                
-                if st.button("업체 특성 분석 실행", type="primary"):
-                    with st.spinner('업체 특성을 분석하고 있습니다...'):
-                        result = analyzer.analyze_customer_characteristics()
-                    
-                    if result['상태'] == '성공':
-                        # 결과를 세션 상태에 저장
-                        st.session_state.company_analysis_result = result
-                        st.success("✅ 업체 특성 분석이 완료되었습니다!")
-                    else:
-                        st.error(result['메시지'])
-                
-                # 분석 결과가 있을 때만 표시
-                if st.session_state.company_analysis_result is not None:
-                    result = st.session_state.company_analysis_result
-                    
-                    # 기본 통계
-                    st.subheader("📊 업체 특성 분포")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.subheader("구매 패턴 분포")
-                        pattern_dist = result['구매패턴분포']
-                        fig = px.pie(values=pattern_dist.values, names=pattern_dist.index,
-                                   title="구매 패턴별 업체 분포")
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    with col2:
-                        st.subheader("품목 다양성 분포")
-                        diversity_dist = result['품목다양성분포']
-                        fig = px.pie(values=diversity_dist.values, names=diversity_dist.index,
-                                   title="품목 다양성별 업체 분포")
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    with col3:
-                        st.subheader("고객 등급 분포")
-                        grade_dist = result['고객등급분포']
-                        fig = px.pie(values=grade_dist.values, names=grade_dist.index,
-                                   title="고객 등급별 업체 분포")
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    # 상관관계 분석
-                    st.subheader("📈 업체 특성 상관관계 분석")
-                    
-                    numeric_data = result['고객특성데이터'][['총매출', '거래횟수', '구매품목수', '활성도점수']]
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # 활성도 점수 vs 총 매출
-                        fig = px.scatter(result['고객특성데이터'], x='활성도점수', y='총매출',
-                                       color='고객등급', size='구매품목수',
-                                       hover_data=['고객명'],
-                                       title="활성도 점수 vs 총 매출")
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    with col2:
-                        # 구매품목수 vs 총매출
-                        fig = px.scatter(result['고객특성데이터'], x='구매품목수', y='총매출',
-                                       color='품목다양성', size='거래횟수',
-                                       hover_data=['고객명'],
-                                       title="구매 품목 수 vs 총 매출")
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    # 필터링 옵션 - 세션 상태로 관리
-                    st.subheader("🔍 업체 특성별 필터링")
-                    
-                    # 세션 상태 키 초기화
-                    if 'selected_pattern' not in st.session_state:
-                        st.session_state.selected_pattern = '전체'
-                    if 'selected_diversity' not in st.session_state:
-                        st.session_state.selected_diversity = '전체'
-                    if 'selected_grade' not in st.session_state:
-                        st.session_state.selected_grade = '전체'
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        pattern_options = ['전체'] + list(result['구매패턴분포'].index)
-                        pattern_index = 0
-                        if st.session_state.selected_pattern in pattern_options:
-                            pattern_index = pattern_options.index(st.session_state.selected_pattern)
+                                        col1, col2 = st.columns(2)
+                                        
+                                        with col1:
+                                            # 파이차트
+                                            fig_pie = px.pie(top_products, values='매출', names='상품명',
+                                                           title=f"{customer} Top 10 품목 매출 비중")
+                                            st.plotly_chart(fig_pie, use_container_width=True)
+                                        
+                                        with col2:
+                                            # 바 차트
+                                            fig_bar = px.bar(top_products, x='상품명', y='매출',
+                                                           title=f"{customer} Top 10 품목 매출")
+                                            fig_bar.update_layout(xaxis_tickangle=45)
+                                            st.plotly_chart(fig_bar, use_container_width=True)
+                                        
+                                        # 데이터 테이블 (숫자 포맷팅)
+                                        display_products = top_products.copy()
+                                        display_products['매출'] = display_products['매출'].apply(lambda x: f"{int(x):,}")
+                                        st.dataframe(display_products, use_container_width=True)
                         
-                        selected_pattern = st.selectbox("구매 패턴", pattern_options,
-                                                      key='pattern_filter',
-                                                      index=pattern_index)
-                        st.session_state.selected_pattern = selected_pattern
-                    
-                    with col2:
-                        diversity_options = ['전체'] + list(result['품목다양성분포'].index)
-                        diversity_index = 0
-                        if st.session_state.selected_diversity in diversity_options:
-                            diversity_index = diversity_options.index(st.session_state.selected_diversity)
-                        
-                        selected_diversity = st.selectbox("품목 다양성", diversity_options,
-                                                        key='diversity_filter',
-                                                        index=diversity_index)
-                        st.session_state.selected_diversity = selected_diversity
-                    
-                    with col3:
-                        grade_options = ['전체'] + list(result['고객등급분포'].index)
-                        grade_index = 0
-                        if st.session_state.selected_grade in grade_options:
-                            grade_index = grade_options.index(st.session_state.selected_grade)
-                        
-                        selected_grade = st.selectbox("고객 등급", grade_options,
-                                                    key='grade_filter',
-                                                    index=grade_index)
-                        st.session_state.selected_grade = selected_grade
-                    
-                    # 필터링된 데이터
-                    filtered_data = result['고객특성데이터'].copy()
-                    
-                    if selected_pattern != '전체':
-                        filtered_data = filtered_data[filtered_data['구매패턴'] == selected_pattern]
-                    
-                    if selected_diversity != '전체':
-                        filtered_data = filtered_data[filtered_data['품목다양성'] == selected_diversity]
-                    
-                    if selected_grade != '전체':
-                        filtered_data = filtered_data[filtered_data['고객등급'] == selected_grade]
-                    
-                    st.info(f"필터링된 업체 수: {len(filtered_data)}개")
-                    
-                    # 상위 업체 분석
-                    if not filtered_data.empty:
-                        st.subheader("🏆 상위 업체 분석")
-                        
-                        tab_top1, tab_top2, tab_top3 = st.tabs(["매출 상위", "활성도 상위", "다양성 상위"])
-                        
-                        with tab_top1:
-                            top_revenue = filtered_data.nlargest(10, '총매출')[['고객명', '총매출', '고객등급', '활성도점수']]
-                            st.dataframe(top_revenue, use_container_width=True)
-                        
-                        with tab_top2:
-                            top_activity = filtered_data.nlargest(10, '활성도점수')[['고객명', '활성도점수', '총매출', '거래횟수', '구매품목수']]
-                            st.dataframe(top_activity, use_container_width=True)
-                        
-                        with tab_top3:
-                            top_diversity = filtered_data.nlargest(10, '구매품목수')[['고객명', '구매품목수', '총매출', '품목다양성', '고객등급']]
-                            st.dataframe(top_diversity, use_container_width=True)
-                        
-                        # 전체 데이터 테이블
-                        st.subheader("📋 전체 업체 특성 데이터")
-                        st.dataframe(filtered_data, use_container_width=True)
+
         
         # 탭 5: 매출분석
-        with tab5:
+        elif st.session_state.selected_tab == 4:
             st.markdown('<h2 class="sub-header">📊 매출분석</h2>', unsafe_allow_html=True)
+            
+            # 선택된 분석 기간 정보 표시
+            if 'date_filtered_analyzer' in st.session_state:
+                filtered_min, filtered_max = analyzer.get_date_range()
+                if filtered_min and filtered_max:
+                    st.info(f"🗓️ 현재 분석 기간: {filtered_min.date()} ~ {filtered_max.date()}")
+                else:
+                    st.info("🗓️ 선택된 기간으로 필터링된 데이터로 분석합니다.")
+            else:
+                st.info("🗓️ 전체 데이터 기간으로 분석합니다.")
             
             # 분석 카테고리 선택
             analysis_category = st.selectbox(
@@ -3928,8 +4627,258 @@ def main():
                     st.error(result['메시지'])
         
         # 탭 6: 미슐랭 분석
-        with tab6:
+        elif st.session_state.selected_tab == 5:
             st.markdown('<h2 class="sub-header">⭐ 미슐랭 분석</h2>', unsafe_allow_html=True)
+            
+            # 선택된 분석 기간 정보 표시
+            if 'date_filtered_analyzer' in st.session_state:
+                filtered_min, filtered_max = analyzer.get_date_range()
+                if filtered_min and filtered_max:
+                    st.info(f"🗓️ 현재 분석 기간: {filtered_min.date()} ~ {filtered_max.date()}")
+                else:
+                    st.info("🗓️ 선택된 기간으로 필터링된 데이터로 분석합니다.")
+            else:
+                st.info("🗓️ 전체 데이터 기간으로 분석합니다.")
+            
+            # 미슐랭 등급별 vs 비미슐랭 업장 특징 비교 분석 (맨 위로 이동)
+            st.subheader("🆚 미슐랭 vs 비미슐랭 업장 특징 비교")
+            if st.button("미슐랭 vs 비미슐랭 비교 분석 실행", type="primary"):
+                with st.spinner('미슐랭 vs 비미슐랭 비교 분석을 수행하고 있습니다...'):
+                    vs_result = analyzer.analyze_michelin_vs_non_michelin()
+                
+                if vs_result['상태'] == '성공':
+                    st.success("✅ 미슐랭 vs 비미슐랭 비교 분석이 완료되었습니다!")
+                    
+                    # 전체 미슐랭 통합 vs 비미슐랭 비교 섹션 추가
+                    if vs_result.get('전체_미슐랭_지표'):
+                        st.subheader("🌟 전체 미슐랭 통합 vs 비미슐랭 비교")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**🌟 전체 미슐랭 업체 (통합)**")
+                            michelin_stats = vs_result['전체_미슐랭_지표']
+                            st.metric("업장 수", f"{michelin_stats['업장_수']:,}개")
+                            st.metric("총 매출", f"{michelin_stats['총_매출']:,.0f}원")
+                            st.metric("평균 주문금액", f"{michelin_stats['평균_주문금액']:,.0f}원")
+                            st.metric("업장당 평균매출", f"{michelin_stats['업장당_평균매출']:,.0f}원")
+                            st.metric("품목 다양성", f"{michelin_stats['품목_다양성']:,}개")
+                        
+                        with col2:
+                            st.markdown("**🏪 비미슐랭 업체**")
+                            non_michelin_stats = vs_result['비미슐랭_기준지표']
+                            st.metric("업장 수", f"{non_michelin_stats['업장_수']:,}개")
+                            st.metric("총 매출", f"{non_michelin_stats['총_매출']:,.0f}원")
+                            st.metric("평균 주문금액", f"{non_michelin_stats['평균_주문금액']:,.0f}원")
+                            st.metric("업장당 평균매출", f"{non_michelin_stats['업장당_평균매출']:,.0f}원")
+                            st.metric("품목 다양성", f"{non_michelin_stats['품목_다양성']:,}개")
+                        
+                        # 통합 비교 배수 차트
+                        if vs_result.get('전체_미슐랭_비교'):
+                            st.subheader("📊 전체 미슐랭 vs 비미슐랭 비교 배수")
+                            comparison_data = []
+                            for metric, value in vs_result['전체_미슐랭_비교'].items():
+                                comparison_data.append({
+                                    '지표': metric.replace('_배수', '').replace('_', ' '),
+                                    '배수': value
+                                })
+                            
+                            if comparison_data:
+                                comparison_df = pd.DataFrame(comparison_data)
+                                fig = px.bar(comparison_df, x='지표', y='배수',
+                                           title="전체 미슐랭 vs 비미슐랭 비교 (배수)",
+                                           color='배수',
+                                           color_continuous_scale='RdYlBu_r')
+                                fig.add_hline(y=1, line_dash="dash", line_color="red", 
+                                            annotation_text="비미슐랭 기준선")
+                                fig.update_layout(xaxis_tickangle=45)
+                                st.plotly_chart(fig, use_container_width=True)
+                        
+                        # 품목 차이 분석
+                        st.subheader("🛒 품목 선호도 차이 분석")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            if vs_result.get('미슐랭_독특한_품목'):
+                                st.markdown("**🌟 미슐랭만의 독특한 품목**")
+                                unique_products = vs_result['미슐랭_독특한_품목'][:10]
+                                for i, product in enumerate(unique_products, 1):
+                                    st.write(f"{i}. {product}")
+                        
+                        with col2:
+                            if vs_result.get('공통_품목'):
+                                st.markdown("**🤝 공통 인기 품목**")
+                                common_products = vs_result['공통_품목'][:10]
+                                for i, product in enumerate(common_products, 1):
+                                    st.write(f"{i}. {product}")
+                        
+                        with col3:
+                            if vs_result.get('비미슐랭_독특한_품목'):
+                                st.markdown("**🏪 비미슐랭만의 독특한 품목**")
+                                non_michelin_unique = vs_result['비미슐랭_독특한_품목'][:10]
+                                for i, product in enumerate(non_michelin_unique, 1):
+                                    st.write(f"{i}. {product}")
+                        
+                        # 계절별/분기별 선호도 비교
+                        if vs_result.get('전체_미슐랭_계절별_선호도') and vs_result.get('비미슐랭_계절별_선호도'):
+                            st.subheader("🌱 계절별 구매 패턴 비교")
+                            
+                            # 계절별 데이터 준비
+                            seasonal_order = ['봄', '여름', '가을', '겨울']
+                            seasonal_comparison_data = []
+                            
+                            for season in seasonal_order:
+                                michelin_qty = vs_result['전체_미슐랭_계절별_선호도'].get(season, 0)
+                                non_michelin_qty = vs_result['비미슐랭_계절별_선호도'].get(season, 0)
+                                
+                                seasonal_comparison_data.append({
+                                    '계절': season,
+                                    '미슐랭': michelin_qty,
+                                    '비미슐랭': non_michelin_qty
+                                })
+                            
+                            seasonal_df = pd.DataFrame(seasonal_comparison_data)
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                fig = px.bar(seasonal_df, x='계절', y=['미슐랭', '비미슐랭'],
+                                           title="계절별 구매량 비교",
+                                           barmode='group',
+                                           category_orders={'계절': seasonal_order})
+                                st.plotly_chart(fig, use_container_width=True)
+                            
+                            with col2:
+                                # 계절별 비율 비교
+                                michelin_total = sum(vs_result['전체_미슐랭_계절별_선호도'].values())
+                                non_michelin_total = sum(vs_result['비미슐랭_계절별_선호도'].values())
+                                
+                                seasonal_ratio_data = []
+                                for season in seasonal_order:
+                                    michelin_ratio = (vs_result['전체_미슐랭_계절별_선호도'].get(season, 0) / michelin_total * 100) if michelin_total > 0 else 0
+                                    non_michelin_ratio = (vs_result['비미슐랭_계절별_선호도'].get(season, 0) / non_michelin_total * 100) if non_michelin_total > 0 else 0
+                                    
+                                    seasonal_ratio_data.append({
+                                        '계절': season,
+                                        '미슐랭 비율': michelin_ratio,
+                                        '비미슐랭 비율': non_michelin_ratio
+                                    })
+                                
+                                seasonal_ratio_df = pd.DataFrame(seasonal_ratio_data)
+                                fig2 = px.line(seasonal_ratio_df, x='계절', y=['미슐랭 비율', '비미슐랭 비율'],
+                                             title="계절별 구매 비율 비교 (%)", markers=True,
+                                             category_orders={'계절': seasonal_order})
+                                st.plotly_chart(fig2, use_container_width=True)
+                        
+                        if vs_result.get('전체_미슐랭_분기별_선호도') and vs_result.get('비미슐랭_분기별_선호도'):
+                            st.subheader("📊 분기별 구매 패턴 비교")
+                            
+                            # 분기별 데이터 준비
+                            quarterly_order = ['1분기', '2분기', '3분기', '4분기']
+                            quarterly_comparison_data = []
+                            
+                            for quarter in quarterly_order:
+                                michelin_qty = vs_result['전체_미슐랭_분기별_선호도'].get(quarter, 0)
+                                non_michelin_qty = vs_result['비미슐랭_분기별_선호도'].get(quarter, 0)
+                                
+                                quarterly_comparison_data.append({
+                                    '분기': quarter,
+                                    '미슐랭': michelin_qty,
+                                    '비미슐랭': non_michelin_qty
+                                })
+                            
+                            quarterly_df = pd.DataFrame(quarterly_comparison_data)
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                fig = px.bar(quarterly_df, x='분기', y=['미슐랭', '비미슐랭'],
+                                           title="분기별 구매량 비교",
+                                           barmode='group',
+                                           category_orders={'분기': quarterly_order})
+                                st.plotly_chart(fig, use_container_width=True)
+                            
+                            with col2:
+                                # 분기별 비율 비교  
+                                michelin_total = sum(vs_result['전체_미슐랭_분기별_선호도'].values())
+                                non_michelin_total = sum(vs_result['비미슐랭_분기별_선호도'].values())
+                                
+                                quarterly_ratio_data = []
+                                for quarter in quarterly_order:
+                                    michelin_ratio = (vs_result['전체_미슐랭_분기별_선호도'].get(quarter, 0) / michelin_total * 100) if michelin_total > 0 else 0
+                                    non_michelin_ratio = (vs_result['비미슐랭_분기별_선호도'].get(quarter, 0) / non_michelin_total * 100) if non_michelin_total > 0 else 0
+                                    
+                                    quarterly_ratio_data.append({
+                                        '분기': quarter,
+                                        '미슐랭 비율': michelin_ratio,
+                                        '비미슐랭 비율': non_michelin_ratio
+                                    })
+                                
+                                quarterly_ratio_df = pd.DataFrame(quarterly_ratio_data)
+                                fig2 = px.line(quarterly_ratio_df, x='분기', y=['미슐랭 비율', '비미슐랭 비율'],
+                                             title="분기별 구매 비율 비교 (%)", markers=True,
+                                             category_orders={'분기': quarterly_order})
+                                st.plotly_chart(fig2, use_container_width=True)
+                    
+                    # 등급별 세부 비교 분석 (기존 코드도 유지)
+                    st.divider()
+                    st.subheader("🔍 등급별 세부 비교 분석")
+                    
+                    # 등급별 비교 차트
+                    if vs_result.get('등급별_비교'):
+                        comparison_data = []
+                        for grade, data in vs_result['등급별_비교'].items():
+                            michelin_stats = data['미슐랭_지표']
+                            comparison_data.append({
+                                '등급': grade,
+                                '업장수': michelin_stats['업장_수'],
+                                '총_매출': michelin_stats['총_매출'],
+                                '평균_주문금액': michelin_stats['평균_주문금액'],
+                                '업장당_평균매출': michelin_stats['업장당_평균매출'],
+                                '품목_다양성': michelin_stats['품목_다양성']
+                            })
+                        
+                        if comparison_data:
+                            comparison_df = pd.DataFrame(comparison_data)
+                            
+                            # 등급별 총 매출 비교
+                            fig1 = px.bar(comparison_df, x='등급', y='총_매출',
+                                         title="미슐랭 등급별 총 매출 비교")
+                            st.plotly_chart(fig1, use_container_width=True)
+                            
+                            # 등급별 평균 주문금액 비교
+                            fig2 = px.bar(comparison_df, x='등급', y='평균_주문금액',
+                                         title="미슐랭 등급별 평균 주문금액 비교")
+                            st.plotly_chart(fig2, use_container_width=True)
+                            
+                            # 등급별 업장당 평균매출 비교
+                            fig3 = px.bar(comparison_df, x='등급', y='업장당_평균매출',
+                                         title="미슐랭 등급별 업장당 평균매출 비교")
+                            st.plotly_chart(fig3, use_container_width=True)
+                            
+                            # 비미슐랭 기준 대비 배수 비교
+                            if vs_result.get('비미슐랭_기준지표'):
+                                non_michelin_avg_order = vs_result['비미슐랭_기준지표']['평균_주문금액']
+                                non_michelin_avg_revenue = vs_result['비미슐랭_기준지표']['업장당_평균매출']
+                                
+                                comparison_df['주문금액_배수'] = comparison_df['평균_주문금액'] / non_michelin_avg_order
+                                comparison_df['매출_배수'] = comparison_df['업장당_평균매출'] / non_michelin_avg_revenue
+                                
+                                fig4 = px.bar(comparison_df, x='등급', y=['주문금액_배수', '매출_배수'],
+                                             title="비미슐랭 대비 배수 비교",
+                                             barmode='group')
+                                fig4.add_hline(y=1, line_dash="dash", line_color="red", 
+                                              annotation_text="비미슐랭 기준선")
+                                st.plotly_chart(fig4, use_container_width=True)
+                            
+                            # 상세 비교 테이블
+                            st.subheader("📊 상세 비교 데이터")
+                            st.dataframe(comparison_df, use_container_width=True)
+                
+                else:
+                    st.error(vs_result['메시지'])
+            
+            st.divider()
             
             # 미슐랭 전체 개요
             st.subheader("📊 미슐랭 레스토랑 전체 개요")
@@ -4152,164 +5101,22 @@ def main():
                 else:
                     st.error(comparison_result['메시지'])
             
-            # 미슐랭 등급별 vs 비미슐랭 업장 특징 비교 분석
-            st.divider()
-            st.subheader("🆚 미슐랭 vs 비미슐랭 업장 특징 비교")
-            if st.button("미슐랭 vs 비미슐랭 비교 분석 실행", type="primary"):
-                with st.spinner('미슐랭 vs 비미슐랭 비교 분석을 수행하고 있습니다...'):
-                    vs_result = analyzer.analyze_michelin_vs_non_michelin()
-                
-                if vs_result['상태'] == '성공':
-                    st.success("✅ 미슐랭 vs 비미슐랭 비교 분석이 완료되었습니다!")
-                    
-                    # 비미슐랭 기준 지표 표시
-                    st.subheader("📊 비미슐랭 업장 기준 지표")
-                    non_michelin_stats = vs_result['비미슐랭_기준지표']
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("업장 수", f"{non_michelin_stats['업장_수']:,}개")
-                    with col2:
-                        st.metric("총 매출", f"{non_michelin_stats['총_매출']:,.0f}원")
-                    with col3:
-                        st.metric("평균 주문금액", f"{non_michelin_stats['평균_주문금액']:,.0f}원")
-                    with col4:
-                        st.metric("업장당 평균매출", f"{non_michelin_stats['업장당_평균매출']:,.0f}원")
-                    
-                    # 등급별 비교 결과
-                    for grade, comparison in vs_result['등급별_비교'].items():
-                        st.subheader(f"🌟 {grade} 등급 vs 비미슐랭 비교")
-                        
-                        # 차별화 특징 표시
-                        if comparison['차별화_특징']:
-                            st.info("**주요 차별화 특징:**")
-                            for feature in comparison['차별화_특징']:
-                                st.write(f"• {feature}")
-                        
-                        # 비교 배수 차트
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            # 배수 비교 바 차트
-                            comparison_metrics = comparison['비교_배수']
-                            metrics_data = []
-                            for metric, value in comparison_metrics.items():
-                                metrics_data.append({
-                                    '지표': metric.replace('_', ' '),
-                                    '배수': value
-                                })
-                            
-                            if metrics_data:
-                                metrics_df = pd.DataFrame(metrics_data)
-                                fig = px.bar(metrics_df, x='지표', y='배수',
-                                           title=f"{grade} vs 비미슐랭 비교 배수")
-                                fig.add_hline(y=1, line_dash="dash", line_color="red", 
-                                            annotation_text="비미슐랭 기준선")
-                                fig.update_layout(xaxis_tickangle=45)
-                                st.plotly_chart(fig, use_container_width=True)
-                        
-                        with col2:
-                            # 지표 비교 테이블
-                            michelin_stats = comparison['미슐랭_지표']
-                            comparison_table = []
-                            
-                            for key in ['총_매출', '평균_주문금액', '업장당_평균매출', '평균_거래횟수']:
-                                if key in michelin_stats and key.replace('업장당', '업장당') in non_michelin_stats:
-                                    non_key = key.replace('업장당', '업장당')
-                                    comparison_table.append({
-                                        '지표': key.replace('_', ' '),
-                                        f'{grade}': f"{michelin_stats[key]:,.0f}",
-                                        '비미슐랭': f"{non_michelin_stats[non_key]:,.0f}",
-                                        '배수': f"{comparison['비교_배수'].get(key+'_배수', 0):.1f}x"
-                                    })
-                            
-                            if comparison_table:
-                                comparison_df = pd.DataFrame(comparison_table)
-                                st.dataframe(comparison_df, use_container_width=True)
-                        
-                        # 품목 차이 분석
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            if comparison['독특한_품목']:
-                                st.write("**독특한 선호 품목:**")
-                                for i, product in enumerate(comparison['독특한_품목'][:5], 1):
-                                    st.write(f"{i}. {product}")
-                        
-                        with col2:
-                            if comparison['공통_품목']:
-                                st.write("**비미슐랭과 공통 품목:**")
-                                for i, product in enumerate(comparison['공통_품목'][:5], 1):
-                                    st.write(f"{i}. {product}")
-                        
-                        # 인기 품목 TOP 5
-                        if comparison['인기_품목_TOP5']:
-                            st.write(f"**{grade} 등급 인기 품목 TOP 5:**")
-                            for i, product in enumerate(comparison['인기_품목_TOP5'], 1):
-                                st.write(f"{i}. {product}")
-                        
-                        st.divider()
-                    
-                    # 전체 미슐랭 vs 비미슐랭 종합 비교 차트
-                    st.subheader("📈 종합 비교 차트")
-                    
-                    # 모든 등급의 비교 배수 데이터 수집
-                    all_comparison_data = []
-                    for grade, comparison in vs_result['등급별_비교'].items():
-                        for metric, value in comparison['비교_배수'].items():
-                            all_comparison_data.append({
-                                '등급': grade,
-                                '지표': metric.replace('_배수', '').replace('_', ' '),
-                                '배수': value
-                            })
-                    
-                    if all_comparison_data:
-                        all_comparison_df = pd.DataFrame(all_comparison_data)
-                        
-                        # 등급별 지표 비교 히트맵
-                        pivot_data = all_comparison_df.pivot(index='등급', columns='지표', values='배수')
-                        fig = px.imshow(pivot_data.values,
-                                      x=pivot_data.columns,
-                                      y=pivot_data.index,
-                                      title="미슐랭 등급별 vs 비미슐랭 비교 히트맵 (배수)",
-                                      color_continuous_scale='RdYlBu_r',
-                                      aspect="auto")
-                        
-                        # 텍스트 주석 추가
-                        for i in range(len(pivot_data.index)):
-                            for j in range(len(pivot_data.columns)):
-                                fig.add_annotation(
-                                    x=j, y=i,
-                                    text=f"{pivot_data.iloc[i, j]:.1f}x",
-                                    showarrow=False,
-                                    font=dict(color="white" if pivot_data.iloc[i, j] > 1.5 else "black")
-                                )
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # 라인 차트로도 표시
-                        fig2 = px.line(all_comparison_df, x='지표', y='배수', color='등급',
-                                     title="미슐랭 등급별 비미슐랭 대비 배수 비교", markers=True)
-                        fig2.add_hline(y=1, line_dash="dash", line_color="red",
-                                     annotation_text="비미슐랭 기준선")
-                        fig2.update_layout(xaxis_tickangle=45)
-                        st.plotly_chart(fig2, use_container_width=True)
-                    
-                    # 비미슐랭 인기 품목 참고 정보
-                    st.subheader("📋 비미슐랭 업장 인기 품목 (참고)")
-                    non_michelin_products = vs_result['비미슐랭_인기품목'][:10]
-                    if non_michelin_products:
-                        cols = st.columns(5)
-                        for i, product in enumerate(non_michelin_products):
-                            with cols[i % 5]:
-                                st.write(f"{i+1}. {product}")
-                
-                else:
-                    st.error(vs_result['메시지'])
+
         
         # 탭 7: 베이커리 & 디저트
-        with tab7:
+        elif st.session_state.selected_tab == 6:
             st.markdown('<h2 class="sub-header">🧁 베이커리 & 디저트 분석</h2>', unsafe_allow_html=True)
+            
+            # 선택된 분석 기간 정보 표시
+            if 'date_filtered_analyzer' in st.session_state:
+                filtered_min, filtered_max = analyzer.get_date_range()
+                if filtered_min and filtered_max:
+                    st.info(f"🗓️ 현재 분석 기간: {filtered_min.date()} ~ {filtered_max.date()}")
+                else:
+                    st.info("🗓️ 선택된 기간으로 필터링된 데이터로 분석합니다.")
+            else:
+                st.info("🗓️ 전체 데이터 기간으로 분석합니다.")
+            
             st.markdown("베이커리 & 디저트 레스토랑들의 특성과 매출 패턴을 분석합니다.")
             
             # 서브탭 구성
@@ -4427,6 +5234,66 @@ def main():
                         # 상위 상품
                         if result['상위상품']:
                             st.subheader("🏆 인기 상품 TOP 10")
+                        # 연월별 판매 추이 그래프 추가
+                        if result['월별추이']:
+                            st.subheader("📈 연월별 판매 추이")
+                            monthly_trend_df = pd.DataFrame.from_dict(result['월별추이'], orient='index')
+                            monthly_trend_df.index.name = '연월'
+                            monthly_trend_df = monthly_trend_df.reset_index()
+                            monthly_trend_df['연월'] = monthly_trend_df['연월'].astype(str)
+                            monthly_trend_df = monthly_trend_df.sort_values('연월')
+                            
+                            # 매출과 구매량 추이를 함께 표시
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                if '금액' in monthly_trend_df.columns:
+                                    fig_revenue = px.line(monthly_trend_df, x='연월', y='금액',
+                                                        title=f"{selected_bakery} 월별 매출 추이", markers=True)
+                                    fig_revenue.update_layout(xaxis_tickangle=45)
+                                    fig_revenue.update_traces(line_color='#1f77b4')
+                                    st.plotly_chart(fig_revenue, use_container_width=True)
+                            
+                            with col2:
+                                if '수량' in monthly_trend_df.columns:
+                                    fig_quantity = px.line(monthly_trend_df, x='연월', y='수량',
+                                                         title=f"{selected_bakery} 월별 구매량 추이", markers=True)
+                                    fig_quantity.update_layout(xaxis_tickangle=45)
+                                    fig_quantity.update_traces(line_color='#ff7f0e')
+                                    st.plotly_chart(fig_quantity, use_container_width=True)
+                            
+                            # 월별 추이 데이터 테이블
+                            st.subheader("📊 월별 상세 데이터")
+                            display_trend_df = monthly_trend_df.copy()
+                            if '금액' in display_trend_df.columns:
+                                display_trend_df['금액'] = display_trend_df['금액'].apply(lambda x: f"{x:,.0f}원")
+                            if '수량' in display_trend_df.columns:
+                                display_trend_df['수량'] = display_trend_df['수량'].apply(lambda x: f"{x:,.0f}개")
+                            st.dataframe(display_trend_df, use_container_width=True)
+                        
+                        # 지점별 연월별 추이 (여러 지점이 있는 경우)
+                        if result.get('지점별월별추이') and len(result['매칭_업체들']) > 1:
+                            st.subheader("🏪 지점별 연월별 매출 비교")
+                            branch_trend_df = pd.DataFrame(result['지점별월별추이'])
+                            
+                            if not branch_trend_df.empty and '연월' in branch_trend_df.columns:
+                                branch_trend_df['연월'] = branch_trend_df['연월'].astype(str)
+                                branch_trend_df = branch_trend_df.sort_values('연월')
+                                
+                                # 지점별 매출 추이 라인 차트
+                                fig_branch_trend = px.line(branch_trend_df, x='연월', y='금액', color='고객명',
+                                                         title=f"{selected_bakery} 지점별 월별 매출 추이", markers=True)
+                                fig_branch_trend.update_layout(xaxis_tickangle=45)
+                                st.plotly_chart(fig_branch_trend, use_container_width=True)
+                                
+                                # 지점별 구매량 추이 라인 차트
+                                fig_branch_quantity = px.line(branch_trend_df, x='연월', y='수량', color='고객명',
+                                                            title=f"{selected_bakery} 지점별 월별 구매량 추이", markers=True)
+                                fig_branch_quantity.update_layout(xaxis_tickangle=45)
+                                st.plotly_chart(fig_branch_quantity, use_container_width=True)
+                        
+                        # 상위 상품 데이터 표시
+                        if result['상위상품']:
                             top_products_df = pd.DataFrame.from_dict(result['상위상품'], orient='index')
                             st.dataframe(top_products_df, use_container_width=True)
                     else:
